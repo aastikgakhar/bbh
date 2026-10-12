@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS planned_cases (
   cell_id INTEGER NOT NULL REFERENCES cells(id), case_no INTEGER NOT NULL, technique TEXT NOT NULL,
   is_control INTEGER NOT NULL, payload TEXT, mutation_json TEXT NOT NULL, positive_json TEXT NOT NULL,
   negative TEXT, route TEXT NOT NULL, principal TEXT, repeat INTEGER NOT NULL DEFAULT 1,
-  needs_counter_read INTEGER NOT NULL DEFAULT 0, description TEXT, extra_json TEXT NOT NULL DEFAULT '{}',
+  needs_counter_read INTEGER NOT NULL DEFAULT 0, description TEXT, rung TEXT, extra_json TEXT NOT NULL DEFAULT '{}',
   PRIMARY KEY (cell_id, case_no)
 );
 CREATE TABLE IF NOT EXISTS test_cases (
@@ -645,13 +645,13 @@ class Ledger:
             for case in cases:
                 cur = c.execute(
                     """INSERT OR IGNORE INTO planned_cases(cell_id, case_no, technique, is_control, payload, mutation_json,
-                       positive_json, negative, route, principal, repeat, needs_counter_read, description, extra_json)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       positive_json, negative, route, principal, repeat, needs_counter_read, description, rung, extra_json)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (cell_id, int(case["case_no"]), case["technique"], 1 if case.get("is_control") else 0,
                      case.get("payload"), _j(case.get("mutation") or []), _j(case.get("positive") or {}),
                      case.get("negative"), case.get("route") or "sender", case.get("principal"),
                      int(case.get("repeat") or 1), 1 if case.get("needs_counter_read") else 0,
-                     case.get("description"), _j(case.get("extra") or {})),
+                     case.get("description"), case.get("rung"), _j(case.get("extra") or {})),
                 )
                 n += cur.rowcount
             return n
@@ -673,6 +673,30 @@ class Ledger:
             if d["case_no"] == int(case_no):
                 return d
         return None
+
+    def positive_rungs(self, cell_id: int) -> list[str]:
+        """Rungs of the planned cases that have a latest-attempt positive outcome."""
+        plan = {p["case_no"]: p.get("rung") for p in self.plan_for(cell_id)}
+        out = []
+        for r in self.latest_cases(cell_id):
+            if r["outcome"] == "positive" and plan.get(r["case_no"]):
+                out.append(plan[r["case_no"]])
+        return out
+
+    def max_positive_rung_index(self, cell_id: int) -> int:
+        vc = C.get(self.cell(cell_id)["vuln_class"])
+        best = -1
+        for rung in self.positive_rungs(cell_id):
+            try:
+                best = max(best, vc.rung_index(rung))
+            except KeyError:
+                pass
+        return best
+
+    def reached_reportable(self, cell_id: int) -> bool:
+        """True when a positive case reached at least the class's minimum reportable rung."""
+        vc = C.get(self.cell(cell_id)["vuln_class"])
+        return self.max_positive_rung_index(cell_id) >= vc.min_rung_index
 
     # -- test cases -----------------------------------------------------------------------------
 

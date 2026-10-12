@@ -433,32 +433,33 @@ def gen_csti(ctx: Ctx) -> list[TestCase]:
                           negative="the literal number does not render in the browser",
                           extra={"browser": dict(page_open)},
                           description="control: the literal product renders in the browser DOM"))
+    # CSTI requires CLIENT-side evaluation. The result value never appears in the payload, and
+    # a precheck on the RAW response requires the literal expression to survive AND the result to
+    # be absent: if the server already produced the result (SSTI), csti stays negative. The result
+    # only appears after the client framework renders, which browser_text_contains confirms.
+    cat = int(f"{a}{b}")  # a distinct result for the string-concat probe, absent from the payload
+    exprs = [
+        ("angular", "arith", "{{%d*%d}}" % (a, b), str(product)),
+        ("angular", "spaced", "{{ %d * %d }}" % (a, b), str(product)),
+        ("vue", "arith", "{{%d*%d}}" % (a, b), str(product)),
+        ("alpine", "arith", "{{%d*%d}}" % (a, b), str(product)),
+        ("angularjs", "arith", "{{%d*%d}}" % (a, b), str(product)),
+        ("concat", "string", "{{'%d'+'%d'}}" % (a, b), str(cat)),
+        ("entity", "encoded_braces", "&#123;&#123;%d*%d&#125;&#125;" % (a, b), str(product)),
+        ("angular", "subtract", "{{%d-%d}}" % (a + b, b), str(a)),
+        ("vue", "add", "{{%d+%d}}" % (a, b), str(a + b)),
+        ("alpine", "nested", "{{%d*(%d+1)}}" % (a, b), str(a * (b + 1))),
+    ]
     n = 1
-    for engine, variant, payload in [
-        ("angular", "arith", "{{%d*%d}}" % (a, b)),
-        ("angular", "arith_spaced", "{{ %d * %d }}" % (a, b)),
-        ("vue", "arith", "{{%d*%d}}" % (a, b)),
-        ("vue", "mustache_attr", "{{%d*%d}}" % (a, b)),
-        ("alpine", "arith", "{{%d*%d}}" % (a, b)),
-        ("angularjs", "brackets", "{{[].constructor}}".replace("[].constructor", "%d*%d" % (a, b))),
-    ]:
+    for engine, variant, payload, result in exprs:
+        precheck = {"type": "all", "of": [{"type": "body_not_contains", "value": result}]}
+        if variant != "encoded_braces":
+            precheck["of"].append({"type": "body_contains", "value": payload})
         cases.append(TestCase(case_no=n, technique=f"csti.{engine}.{variant}", payload=payload,
                               mutation=[{"op": "set_input", "value": payload, "raw": True}], route="browser",
-                              positive={"type": "all", "of": [{"type": "browser_text_contains", "value": str(product)}]},
-                              negative=f"the {engine} expression renders literally (no client evaluation)",
-                              rung="expression_evaluates" if "arith" in variant else "framework_identified",
-                              extra={"browser": dict(page_open, precheck={"type": "body_contains", "value": payload})},
-                              description=f"CSTI probe for {engine}"))
-        n += 1
-    # a few encoding / attribute variants for breadth
-    for variant, payload in [("entity", "&#123;&#123;%d*%d&#125;&#125;" % (a, b)),
-                            ("attr", "x{{%d*%d}}x" % (a, b)),
-                            ("ng_bind", "<span ng-bind='%d*%d'></span>" % (a, b)),
-                            ("v_text", "<span v-text='%d*%d'></span>" % (a, b))]:
-        cases.append(TestCase(case_no=n, technique=f"csti.render.{variant}", payload=payload,
-                              mutation=[{"op": "set_input", "value": payload, "raw": True}], route="browser",
-                              positive={"type": "browser_text_contains", "value": str(product)},
-                              negative=f"the {variant} form does not evaluate client-side", rung="expression_evaluates",
-                              extra={"browser": dict(page_open)}))
+                              positive={"type": "browser_text_contains", "value": result},
+                              negative=f"the {engine} {variant} expression is not evaluated client-side (it renders literally, or the server evaluated it, which is SSTI not CSTI)",
+                              rung="expression_evaluates", extra={"browser": dict(page_open, precheck=precheck)},
+                              description=f"CSTI probe for {engine} ({variant}); client-side only"))
         n += 1
     return cases

@@ -135,6 +135,7 @@ class Browser:
         self.port = _free_port()
         self.profile = tempfile.mkdtemp(prefix="bbh-headless-")
         args = [self.binary, "--headless=new", f"--remote-debugging-port={self.port}",
+                "--remote-allow-origins=*",  # modern Chrome rejects the DevTools WS otherwise
                 f"--user-data-dir={self.profile}", "--no-first-run", "--no-default-browser-check",
                 "--disable-gpu", "--disable-extensions", "--disable-sync", "--no-sandbox",
                 "--disable-background-networking", "--window-size=1280,900", "about:blank"]

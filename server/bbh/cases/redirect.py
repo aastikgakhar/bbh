@@ -55,7 +55,7 @@ def gen_open_redirect(ctx: Ctx) -> list[TestCase]:
         ("userinfo", "encoded_at", f"https://{allowed}%40{EVIL}"),
         ("subdomain", "suffix", f"https://{allowed}.{EVIL}"),
         ("fragment", "hash_at", f"https://{EVIL}%23@{allowed}"),
-        ("whitespace", "tab", f"https://{EVIL}\t"),
+        ("whitespace", "tab", f"https://{EVIL}%09"),
         ("encoding", "double", f"https:%252f%252f{EVIL}"),
         ("nullbyte", "host", f"https://{EVIL}%00.{allowed}"),
     ]

@@ -385,7 +385,8 @@ def redirect_ep():
     except Exception:
         return page("bad url"), 400
     host = netloc.split("@")[0].split(":")[0]   # BUG: keeps credentials side, drops the real host
-    if host == "lab.test":
+    allowed = (request.host or "").split(":")[0]  # this app's own host
+    if host == allowed:
         return redirect(url)
     return page("redirect refused"), 400
 

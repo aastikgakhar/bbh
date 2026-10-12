@@ -148,14 +148,15 @@ def gen_idor_write(ctx: Ctx) -> list[TestCase]:
                           rung="cross_principal_write_counter_read", extra={"counter_read": counter},
                           description="IDOR write: unauthenticated, confirmed by counter-read"))
     n += 1
-    # delete (only between test accounts, confirmed by counter-read showing absence)
+    # delete (only between test accounts). A counter-read showing ABSENCE alone is a no-op trap
+    # (the object may never have held the marker), so this needs a before/after a human sets up.
     cases.append(TestCase(case_no=n, technique="idor_write.cross.delete", payload="DELETE {{OTHER_ID}}",
                           mutation=[{"op": "set_input", "value": "{{OTHER_ID}}"}, {"op": "set_method", "method": "DELETE"}, {"op": "as_principal", "principal": acting}],
                           principal=acting, route="counter_read", needs_counter_read=True,
-                          positive={"type": "counter_read_not_contains", "value": "edited-"},
-                          negative="the cross-account delete did not remove the object (the owner still reads it)",
+                          positive={"type": "manual", "describe": "read the object as the owner BEFORE and AFTER this delete; a positive is the object present before and gone (404) after, not merely absent"},
+                          negative="the owner still reads the object after the cross-account delete",
                           rung="cross_principal_write_counter_read", extra={"counter_read": counter},
-                          description="IDOR cross-account delete (test accounts only), confirmed by counter-read"))
+                          description="IDOR cross-account delete (test accounts only); needs a before/after counter-read"))
     n += 1
     return cases
 

@@ -236,12 +236,17 @@ def run_case(ledger, cell_id: int, case_no: int, *, principal: str | None = None
 def _run_browser_case(ledger, cell_id, case_no, planned, ctx, base, ref, sub, principal, sender, cap_dir, stem,
                       base_principal, browser_factory, now) -> dict:
     bspec = planned.get("extra", {}).get("browser", {})
-    # optional precheck: send the mutated request first; skip the browser if it is false
+    open_kind = bspec.get("open")
     precheck = bspec.get("precheck")
     exchange_for_block = None
-    if bspec.get("open") in ("request", None) or precheck:
-        mutated, _ = apply(base, planned["mutation"], ref, substitute=sub)
-        res = sender.send(mutated, principal=principal, capture=cap_dir / f"{stem}.http", cell_id=cell_id,
+    # Send the mutated request first for every non-hosted-PoC browser case: for a reflected case
+    # (open=request) this is the request the browser then loads and the precheck target; for a
+    # stored case (open=path) this is the STORE that plants the payload before the render page is
+    # viewed. Only the hosted-PoC flow (open=poc) skips this (the PoC issues the request itself).
+    if open_kind != "poc":
+        mutated, mp = apply(base, planned["mutation"], ref, substitute=sub)
+        store_principal = mp or principal
+        res = sender.send(mutated, principal=store_principal, capture=cap_dir / f"{stem}.http", cell_id=cell_id,
                           case_no=case_no, technique=planned["technique"], route="browser", endpoint_id=cell_id and ledger.cell(cell_id)["endpoint_id"],
                           vuln_class=ledger.cell(cell_id)["vuln_class"], base_principal=base_principal)
         exchange_for_block = res.exchange
@@ -255,7 +260,6 @@ def _run_browser_case(ledger, cell_id, case_no, planned, ctx, base, ref, sub, pr
     from .browser import Browser, cookies_for
 
     url = ctx.url
-    open_kind = bspec.get("open")
     fragment = None
     if open_kind == "path":
         url = base.origin.rstrip("/") + "/" + str(bspec.get("path", "")).lstrip("/")
@@ -351,7 +355,7 @@ def _decide(ledger, planned, eval_ctx, exchange_for_block, cap_dir, stem) -> tup
     if result is True:
         return ("control_pass" if planned["is_control"] else "positive"), f"{detail} ({loc})"
     if result is None:
-        return "inconclusive", f"could not evaluate: {detail} ({loc})"
+        return "inconclusive", f"the condition cannot be evaluated automatically: {detail} ({loc})"
     return ("control_fail" if planned["is_control"] else "negative"), f"{detail} ({loc})"
 
 
