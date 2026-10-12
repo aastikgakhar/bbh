@@ -109,16 +109,21 @@ def parse_record(rec: str) -> tuple[str, str | None, bool]:
 
 # --- scheme inference ----------------------------------------------------------------------------
 
-def infer_scheme(raw_request: str, scope) -> str:
+def infer_scheme(raw_request: str, scope, host_scheme: dict | None = None) -> str:
     host = ""
     m = re.search(r"^Host:\s*(\S+)", raw_request, re.M | re.I)
     if m:
         host = m.group(1).strip().lower()
+    # 1. a same-host Origin/Referer on THIS record reveals the scheme directly
     for hdr in ("Origin", "Referer"):
         mm = re.search(rf"^{hdr}:\s*(https?)://([^/\s]+)", raw_request, re.M | re.I)
         if mm and mm.group(2).lower() == host:
             return mm.group(1).lower()
+    # 2. a scheme learned for this host elsewhere in the same ingest batch
+    if host_scheme and host in host_scheme:
+        return host_scheme[host]
     hostname, _, port = host.partition(":")
+    # 3. scope that admits only one scheme for this host
     for scheme in ("https", "http"):
         try:
             scope.check_url(f"{scheme}://{host}/")
@@ -128,12 +133,32 @@ def infer_scheme(raw_request: str, scope) -> str:
         try:
             scope.check_url(f"{other}://{host}/")
         except ScopeError:
-            return scheme  # only one scheme is in scope
+            return scheme
     if port == "443":
         return "https"
     if port in ("80", "8080", "8000", "5000", "3000") or re.match(r"^(\d+\.){3}\d+$|^localhost$", hostname):
         return "http"
     return "https"
+
+
+def host_scheme_hints(records: list[tuple[int, str]]) -> dict:
+    """Scan a batch of raw records for same-host Origin/Referer lines that reveal each host's
+    scheme, so an ambiguous record (e.g. a GET whose Referer is cross-site) still gets it right."""
+    hints: dict[str, str] = {}
+    for _, rec in records:
+        raw = rec
+        host_m = re.search(r'"request":"((?:[^"\\]|\\.)*)"', rec)
+        raw_req = _unescape(host_m.group(1)) if host_m else rec
+        hm = re.search(r"(?:\\r\\n|\r\n|\n)?Host:\s*(\S+)", raw_req, re.I)
+        host = hm.group(1).strip().lower() if hm else None
+        if not host or host in hints:
+            continue
+        for hdr in ("Origin", "Referer"):
+            mm = re.search(rf"{hdr}:\s*(https?)://{re.escape(host)}\b", raw_req, re.I)
+            if mm:
+                hints[host] = mm.group(1).lower()
+                break
+    return hints
 
 
 def scope_host_regex(scope) -> str | None:
@@ -148,7 +173,10 @@ def scope_host_regex(scope) -> str | None:
         alts.append(prefix + host + port)
     if not alts:
         return None
-    return r"Host: (" + "|".join(alts) + r")\\r\\n"
+    # Burp applies this regex to the real message (lines end with a real CR), so terminate on \r.
+    # It is only a fast pre-filter; ingest.record_exchange scope-checks every record precisely,
+    # so a loose match here can never let an out-of-scope request into the ledger.
+    return r"Host: (" + "|".join(alts) + r")(:\d+)?\r"
 
 
 # --- Burp MCP client ----------------------------------------------------------------------------------
@@ -306,11 +334,12 @@ def sync_burp(ledger, *, max_records: int = 500, budget_s: float = 60.0, fetcher
             report.errors.append("Burp history changed below the cursor (cleared or new project); re-reading from offset 0")
             start = 0
     records = fetch(url, regex, start, max_records=max_records, page=50, budget_s=budget_s)
+    scheme_hints = host_scheme_hints(records)
     for offset, rec in records:
         report.records_seen += 1
         try:
             raw_req, raw_resp, truncated = parse_record(rec)
-            scheme = infer_scheme(raw_req, scope)
+            scheme = infer_scheme(raw_req, scope, scheme_hints)
             req = parse_request(raw_req.encode("utf-8", "surrogateescape"), default_scheme=scheme)
             resp = None
             if raw_resp:

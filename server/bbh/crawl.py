@@ -53,7 +53,11 @@ def crawl(ledger, sender, start_url: str, *, max_pages: int = 40, principal: str
         ex = res.exchange
         if ex.response is None:
             continue
-        rid = record_exchange(ledger, ex, source="traffic", principal_id=_pid(ledger, principal))
+        # crawl fetches through the sender, so the request source is "sender" (the
+        # requests table CHECK allows burp/sender/browser/import; the endpoint source is
+        # "traffic", set inside record_exchange). record_exchange is what creates the
+        # endpoint and inputs; the sender has already written its own capture row.
+        rid = record_exchange(ledger, ex, source="sender", principal_id=_pid(ledger, principal))
         r = ledger.request(rid)
         if r.get("endpoint_id"):
             pr = plan(ledger, r["endpoint_id"])

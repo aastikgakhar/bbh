@@ -25,6 +25,10 @@ SIGNATURES = [
     ("datadome", (403,), r"datadome|dd\.js", None),
     ("perimeterx", (403,), r"_pxCaptcha|px-captcha|PerimeterX", None),
     ("captcha", (200, 403, 429), r"g-recaptcha|h-captcha|cf-turnstile|captcha-delivery", None),
+    # the proxy's OWN error/interstitial page (it could not reach the target: wrong scheme, DNS,
+    # TLS, connection refused). Burp serves it as 200, so without this it reads as a real response.
+    ("burp-error", (200, 502, 504), r"<title>Burp Suite</title>|Burp Suite.{0,80}(failed|error|could not|unable to|cannot)|InterceptionHandler|burpsuite", None),
+    ("proxy-error", (200, 502, 503, 504), r"(Zscaler|Squid|mitmproxy|Fiddler|Charles Proxy).{0,120}(error|failed|denied|blocked)", None),
 ]
 
 

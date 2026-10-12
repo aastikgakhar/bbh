@@ -197,6 +197,22 @@ def _u(text: str | None, default: Any = None) -> Any:
         return default
 
 
+_MIN_ROWID = -(2 ** 63)
+_MAX_ROWID = 2 ** 63 - 1
+
+
+def _as_rowid(value: Any) -> int | None:
+    """int(value) when it fits SQLite's signed 64-bit INTEGER column, else None.
+
+    Lets the getters answer a clean 'does not exist' for an absurd id (e.g. 10**30)
+    instead of letting sqlite raise OverflowError at the parameter bind."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return None
+    return v if _MIN_ROWID <= v <= _MAX_ROWID else None
+
+
 class Ledger:
     def __init__(self, paths: Paths | str | Path, *, now=time.time, busy_timeout_ms: int = 5000):
         self.paths = paths if isinstance(paths, Paths) else Paths(Path(paths))
@@ -373,7 +389,8 @@ class Ledger:
 
     def principal(self, label_or_id: str | int) -> dict:
         if isinstance(label_or_id, int) or (isinstance(label_or_id, str) and label_or_id.isdigit()):
-            row = self.q1("SELECT * FROM principals WHERE id = ?", (int(label_or_id),))
+            pid = _as_rowid(label_or_id)
+            row = None if pid is None else self.q1("SELECT * FROM principals WHERE id = ?", (pid,))
         else:
             row = self.q1("SELECT * FROM principals WHERE label = ?", (label_or_id,))
         if row is None:
@@ -420,7 +437,8 @@ class Ledger:
             return int(cur.lastrowid), True
 
     def request(self, request_id: int) -> dict:
-        row = self.q1("SELECT * FROM requests WHERE id = ?", (int(request_id),))
+        rid = _as_rowid(request_id)
+        row = None if rid is None else self.q1("SELECT * FROM requests WHERE id = ?", (rid,))
         if row is None:
             raise LedgerError(f"request {request_id} does not exist")
         return dict(row)
@@ -469,7 +487,8 @@ class Ledger:
             return eid, True
 
     def endpoint(self, endpoint_id: int) -> dict:
-        row = self.q1("SELECT * FROM endpoints WHERE id = ?", (int(endpoint_id),))
+        eid = _as_rowid(endpoint_id)
+        row = None if eid is None else self.q1("SELECT * FROM endpoints WHERE id = ?", (eid,))
         if row is None:
             raise LedgerError(f"endpoint {endpoint_id} does not exist")
         d = dict(row)
@@ -481,7 +500,10 @@ class Ledger:
         with self.tx() as c:
             n = 0
             for eid in endpoint_ids:
-                n += c.execute("UPDATE endpoints SET feature = ? WHERE id = ?", (feature, int(eid))).rowcount
+                rid = _as_rowid(eid)
+                if rid is None:
+                    continue
+                n += c.execute("UPDATE endpoints SET feature = ? WHERE id = ?", (feature, rid)).rowcount
             self.event("endpoint.feature", "endpoint", None, detail={"ids": endpoint_ids, "feature": feature})
             return n
 
@@ -508,7 +530,8 @@ class Ledger:
             return iid, True
 
     def input(self, input_id: int) -> dict:
-        row = self.q1("SELECT * FROM inputs WHERE id = ?", (int(input_id),))
+        iid = _as_rowid(input_id)
+        row = None if iid is None else self.q1("SELECT * FROM inputs WHERE id = ?", (iid,))
         if row is None:
             raise LedgerError(f"input {input_id} does not exist")
         d = dict(row)
@@ -551,7 +574,8 @@ class Ledger:
             return cid, True
 
     def cell(self, cell_id: int) -> dict:
-        row = self.q1("SELECT * FROM cells WHERE id = ?", (int(cell_id),))
+        cid = _as_rowid(cell_id)
+        row = None if cid is None else self.q1("SELECT * FROM cells WHERE id = ?", (cid,))
         if row is None:
             raise LedgerError(f"cell {cell_id} does not exist")
         d = dict(row)
@@ -870,7 +894,7 @@ class Ledger:
                     missing.append(f"reason from this class's n_a list: {', '.join(vc.na_reasons)}")
                 if reason_request_id is None:
                     missing.append("reason_request_id: the id of a request that proves the reason")
-                elif self.q1("SELECT id FROM requests WHERE id = ?", (int(reason_request_id),)) is None:
+                elif _as_rowid(reason_request_id) is None or self.q1("SELECT id FROM requests WHERE id = ?", (_as_rowid(reason_request_id),)) is None:
                     missing.append(f"reason_request_id {reason_request_id} is not a recorded request")
                 if current == "candidate":
                     missing.append("a candidate cannot become n_a; it was observed to respond, so confirm it or refute it with the verifier")
@@ -954,7 +978,8 @@ class Ledger:
     # -- findings ----------------------------------------------------------------------------------
 
     def finding(self, finding_id: int) -> dict:
-        row = self.q1("SELECT * FROM findings WHERE id = ?", (int(finding_id),))
+        fid = _as_rowid(finding_id)
+        row = None if fid is None else self.q1("SELECT * FROM findings WHERE id = ?", (fid,))
         if row is None:
             raise LedgerError(f"finding {finding_id} does not exist")
         d = dict(row)
@@ -1166,7 +1191,8 @@ class Ledger:
             return did, True
 
     def depth_item(self, item_id: int) -> dict:
-        row = self.q1("SELECT * FROM depth_queue WHERE id = ?", (int(item_id),))
+        did = _as_rowid(item_id)
+        row = None if did is None else self.q1("SELECT * FROM depth_queue WHERE id = ?", (did,))
         if row is None:
             raise LedgerError(f"depth item {item_id} does not exist")
         d = dict(row)

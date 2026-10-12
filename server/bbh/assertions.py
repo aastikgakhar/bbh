@@ -31,8 +31,10 @@ CHECK_TYPES = {
     "status_in": ("values",),
     "location_host": ("host",),
     "elapsed_over_baseline": ("baseline", "min_ms"),
+    "elapsed_over_case": ("case", "min_ms"),
     "elapsed_ratio": ("a", "b", "min_ratio"),
     "len_diff": ("a", "b", "min_bytes"),
+    "same_as_case": ("case",),
     "oob_hit": ("token",),
     "browser_marker": ("token",),
     "all": ("of",),
@@ -114,13 +116,15 @@ def validate(assertion: dict, root: Path | None = None) -> list[str]:
                 check_one(sub, f"{path}.of[{j}]")
         elif t == "not":
             check_one(c.get("of"), f"{path}.of")
-        for ref_key in ("step", "a", "b", "baseline"):
+        for ref_key in ("step", "a", "b", "baseline", "case"):
             ref = c.get(ref_key)
-            if ref is not None and t not in ("all", "any", "not") and ref_key != "step" and isinstance(ref, str) and ref not in ids:
+            if (ref is not None and ref != "this" and t not in ("all", "any", "not")
+                    and ref_key != "step" and isinstance(ref, str) and ref not in ids):
                 problems.append(f"{path}.{ref_key} refers to unknown step {ref!r}")
         if c.get("step") is not None and c["step"] not in ids:
             problems.append(f"{path}.step refers to unknown step {c['step']!r}")
-        if t not in ("oob_hit", "all", "any", "not", "len_diff", "elapsed_ratio") and "step" not in c:
+        no_step_ok = ("oob_hit", "all", "any", "not", "len_diff", "elapsed_ratio", "same_as_case", "elapsed_over_case")
+        if t not in no_step_ok and "step" not in c:
             problems.append(f"{path} ({t}) needs 'step'")
 
     for i, c in enumerate(checks):

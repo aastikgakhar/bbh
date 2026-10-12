@@ -36,6 +36,8 @@ def oob_url(ledger, cell_id: int | None, case_no: int | None = None) -> dict:
     if mode in (None, "none", "invalid"):
         return {"configured": False, "reason": "no OOB service is configured; set 'OOB callback' in prompt.md "
                 "(e.g. 'local 7731' for the built-in listener). Until then SSRF/XXE cells are blocked: no_oob_listener."}
+    if cell_id is not None:
+        ledger.cell(cell_id)  # raises LedgerError for a nonexistent or out-of-range cell; no orphan token
     token = mint_token()
     if mode == "listener":
         base = cfg["base"].rstrip("/")
@@ -52,7 +54,13 @@ def oob_url(ledger, cell_id: int | None, case_no: int | None = None) -> dict:
 
 
 def oob_check(ledger, cell_id: int) -> dict:
-    tokens = [r["token"] for r in ledger.q("SELECT token FROM oob WHERE cell_id = ?", (cell_id,))]
+    try:
+        cid = int(cell_id)
+    except (TypeError, ValueError):
+        cid = None
+    if cid is None or not (-(2 ** 63) <= cid <= 2 ** 63 - 1):
+        return {"tokens": 0, "hits": [], "received": False}
+    tokens = [r["token"] for r in ledger.q("SELECT token FROM oob WHERE cell_id = ?", (cid,))]
     hits = []
     for t in tokens:
         for h in ledger.q("SELECT * FROM oob_hits WHERE token = ? ORDER BY ts", (t,)):

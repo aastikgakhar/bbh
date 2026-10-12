@@ -17,8 +17,8 @@ from .httpraw import Exchange
 
 @dataclass
 class EvalContext:
-    this_case: int
-    exchanges: dict[int, list[Exchange]] = field(default_factory=dict)  # case_no -> repeats
+    this_case: int | str
+    exchanges: dict = field(default_factory=dict)  # case_no (runner) OR step id (verify) -> repeats
     counter: Exchange | None = None
     browser: dict | None = None  # {"console": [...], "dialogs": [...], "title": str, "text": str}
     oob_hits: list[dict] = field(default_factory=list)
@@ -29,9 +29,17 @@ class EvalContext:
         return self.exchanges.get(self.this_case, [])
 
     def case(self, ref) -> list[Exchange]:
+        # Runner keys exchanges by integer case_no; verify keys them by string step id (and by
+        # integer position). Resolve an exact key first (so a string step id like "false" or a
+        # numeric step id never collides with a position), then fall back to an int case_no.
         if ref in (None, "this"):
             return self.this()
-        return self.exchanges.get(int(ref), [])
+        if ref in self.exchanges:
+            return self.exchanges[ref]
+        try:
+            return self.exchanges.get(int(ref), [])
+        except (TypeError, ValueError):
+            return self.exchanges.get(ref, [])
 
 
 def _hdr(ex: Exchange, name: str) -> list[str]:
@@ -133,15 +141,23 @@ def evaluate(cond: dict, ctx: EvalContext) -> tuple[bool | None, str]:
     if t == "matches_base":
         ratio = float(cond.get("max_len_ratio", 0.25))
         base = ctx.base
+        # Burp truncates history responses to ~5 KB, so a base ingested from Burp is a PREFIX of
+        # the real page. The control's own send is the full page, so a strict length match would
+        # always fail for pages over ~5 KB. When the base is truncated, require only that the
+        # status matches and the full response is at least as long as the truncated prefix.
+        base_truncated = bool(base and (base.meta or {}).get("truncated"))
 
         def f(e):
             if e.response is None:
                 return False, f"no response ({e.error})"
             if base is None or base.response is None:
-                return e.status < 400, f"status {e.status} (no captured base response; 2xx/3xx required)"
+                return e.status < 400 and e.length > 0, f"status {e.status} (no captured base; 2xx/3xx with a body required)"
             same_status = e.status == base.status
             bl, el = base.length, e.length
-            close = abs(el - bl) <= max(32, ratio * max(bl, 1))
+            if base_truncated:
+                ok = same_status and el >= bl - 32
+                return ok, f"status {e.status} vs base {base.status}, {el} bytes vs truncated base prefix {bl}"
+            close = abs(el - bl) <= max(64, ratio * max(bl, 1))
             return same_status and close, f"status {e.status} vs base {base.status}, {el} vs {bl} bytes"
         return _per_repeat(ctx.this(), f)
     if t == "len_diff":
@@ -167,13 +183,28 @@ def evaluate(cond: dict, ctx: EvalContext) -> tuple[bool | None, str]:
             return (e.status == ref.status and d <= m), f"status {e.status} vs {ref.status}, len diff {d} vs case {k}"
         return _per_repeat(ctx.case(a), f)
     if t == "elapsed_over_baseline":
-        base_case = cond.get("baseline_case", 0)
+        # runner cases use "baseline_case" (an int case_no); finding assertions use "baseline"
+        # (a step id). Honour either, so the verifier does not silently fall back to case 0.
+        base_case = cond.get("baseline_case", cond.get("baseline", 0))
         med = _median_elapsed(ctx.case(base_case))
         if med is None:
             return None, f"baseline case {base_case} has no timing"
         n = int(cond["min_ms"])
         return _per_repeat(ctx.this(), lambda e: (e.response is not None and e.elapsed_ms - med >= n,
                                                   f"{e.elapsed_ms} ms vs baseline median {med:.0f} ms (need +{n})"))
+    if t == "elapsed_ratio":
+        a, b = cond.get("a", "this"), cond["b"]
+        med_b = _median_elapsed(ctx.case(b))
+        if med_b is None or med_b <= 0:
+            return None, f"case {b} has no usable baseline timing"
+        ratio = float(cond["min_ratio"])
+
+        def f(e):
+            if e.response is None:
+                return None, f"no response ({e.error})"
+            r = e.elapsed_ms / med_b
+            return r >= ratio, f"{e.elapsed_ms} ms / {med_b:.0f} ms = {r:.2f}x (need >= {ratio}x)"
+        return _per_repeat(ctx.case(a), f)
     if t == "elapsed_over_case":
         med = _median_elapsed(ctx.case(cond["case"]))
         if med is None:

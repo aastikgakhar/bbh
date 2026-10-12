@@ -227,3 +227,48 @@ def test_next_task_prioritises_candidates_then_high_value(ledger, eng):
                        observation="A read B's content (captures/cand.http)", request_capture=cap, response_capture=cap)
     t2 = tasks.next_task(ledger, peek=True)
     assert t2.kind == "candidate" and t2.cell_id == cell["id"]
+
+
+# --- regression: crawl must actually record the pages it fetches ----------------------------
+
+def crawl_app(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+    if path == "/":
+        return httpx.Response(200, headers={"Content-Type": "text/html"},
+                              text="<html><body><a href='/search?q=hi'>s</a> "
+                                   "<a href='/logout'>out</a> "
+                                   "<a href='http://off.site/x'>off</a></body></html>")
+    if path == "/search":
+        return httpx.Response(200, headers={"Content-Type": "text/html"}, text="<html>ok</html>")
+    return httpx.Response(404, text="nope")
+
+
+def test_crawl_records_pages_and_creates_endpoints(ledger, eng):
+    """crawl once passed source='traffic' to record_exchange, which the requests
+    CHECK (burp/sender/browser/import) rejected, so no page was ever recorded."""
+    (eng.captures / "session-A.txt").write_text("Cookie: lab_session=AAA\n")
+    from bbh.crawl import crawl
+    clk = _Clock()
+    s = Sender(ledger, transport=httpx.MockTransport(crawl_app), clock=clk.clock, sleep=clk.sleep, proxy=None)
+    out = crawl(ledger, s, "http://127.0.0.1:5057/", max_pages=5, principal="A")
+    assert out["ok"] is True, out
+    assert out["pages_fetched"] >= 2, out            # root + /search, both recorded, no CHECK error
+    assert out["new_endpoints"] >= 1, out
+    assert ledger.q1("SELECT id FROM endpoints WHERE path_template='/search'") is not None
+    srcs = {r["source"] for r in ledger.q("SELECT DISTINCT source FROM requests")}
+    assert srcs and srcs <= {"sender"}, srcs         # every recorded request has a valid source
+    assert not ledger.q1("SELECT 1 FROM requests WHERE url LIKE '%logout%'")  # destructive link skipped
+    assert not ledger.q1("SELECT 1 FROM requests WHERE url LIKE '%off.site%'")  # off-origin link skipped
+
+
+def test_out_of_range_ids_report_not_found_not_overflow(ledger):
+    """An absurd id (10**30) must answer a clean 'does not exist', not leak a SQLite
+    OverflowError up through the tool wrapper."""
+    from bbh.ledger import LedgerError
+    for name in ("cell", "finding", "endpoint", "input", "request", "depth_item"):
+        with pytest.raises(LedgerError) as exc:
+            getattr(ledger, name)(10 ** 30)
+        assert "does not exist" in str(exc.value)
+    assert ledger.set_feature([10 ** 30], "x") == 0          # out-of-range ids are skipped, not bound
+    from bbh.oob import oob_check
+    assert oob_check(ledger, 10 ** 30) == {"tokens": 0, "hits": [], "received": False}
