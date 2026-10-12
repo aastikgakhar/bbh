@@ -20,6 +20,11 @@ DEFAULT_TESTERS = 3
 HARD_CAP_TESTERS = 25
 DEFAULT_BURP_PROXY = "127.0.0.1:8080"
 DEFAULT_BURP_MCP = "http://127.0.0.1:9876"
+DEFAULT_OOB_PORT = 7731
+DEFAULT_POC_PORT = 7732
+DEFAULT_DASHBOARD_PORT = 7733
+# bbh never listens on these (inventory.md Section 4)
+RESERVED_PORTS = {8080, 8765, 8766, 9222, *range(9876, 9896)}
 
 _FIELD_RE = re.compile(r"^\s*[-*]\s*\*\*(?P<key>[^*:]+?)\s*:?\s*\*\*\s*:?\s*(?P<value>.*)$")
 _STOP_RE = re.compile(r"^#\s+(worked\s+example|example)\b", re.IGNORECASE)
@@ -270,7 +275,8 @@ def parse_oob(value: str) -> dict:
     parts = v.split()
     kind = parts[0].lower()
     if kind == "local":
-        port = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 8765
+        # 8765/8766 belong to ClaudeCodeBrowser and 9876-9895 to browser-mcp (inventory.md Section 4)
+        port = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else DEFAULT_OOB_PORT
         base = f"http://127.0.0.1:{port}"
         return {"mode": "listener", "base": base, "poll": f"{base}/__poll", "local_port": port}
     if kind == "listener" and len(parts) >= 3:
