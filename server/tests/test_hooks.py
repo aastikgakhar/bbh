@@ -31,8 +31,11 @@ def run_hook(script, payload, root, plugin_root=None):
     env["PYTHONPATH"] = str(SERVER) + os.pathsep + env.get("PYTHONPATH", "")
     env.pop("BBH_ENGAGEMENT_DIR", None)
     env.pop("CLAUDE_PROJECT_DIR", None)  # isolation: the hook must key off the payload cwd, not a leaked project dir
+    # Each call spawns a cold Python interpreter + imports bbh; under full-suite load on a busy
+    # Windows box three such spawns in one test can exceed a tight bound. 120s still catches a
+    # genuine infinite-loop hang (the real hook has no timeout) without flaking on a loaded host.
     p = subprocess.run([sys.executable, str(HOOKS / script)], input=json.dumps(payload).encode(),
-                       capture_output=True, env=env, timeout=30)
+                       capture_output=True, env=env, timeout=120)
     out = p.stdout.decode("utf-8", "replace").strip()
     try:
         return json.loads(out) if out else {}, p.returncode, p.stderr.decode("utf-8", "replace")
