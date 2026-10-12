@@ -1,0 +1,106 @@
+# Target brief
+
+Copy this file to `prompt.md`, fill the fields, delete the guidance in parentheses, and hand it over with "go".
+
+Everything not in this file is already in `.claude/CLAUDE.md` and the four skills, and does not need repeating per target.
+
+---
+
+## Target
+
+- **Asset:** `<name>`
+- **Scope:** `<in-scope hosts and wildcards, comma separated>`
+- **Out of scope:** `<anything the programme lists, beyond the standing list in CLAUDE.md>`
+- **Programme:** `<public | private>` (private means skip the public-research step in `coverage-matrix`)
+- **Marker header:** `none` (set it only if this programme requires one for WAF allowlisting; the default is to send nothing identifying)
+
+## Login
+
+- **Method:** `<Continue with Google | email and password | magic link | email OTP | SSO/SAML | other>`
+- **Credentials:** `<where they are, or "ask me">`
+- **Notes:** `<anything non-obvious: a workspace to pick after login, an MFA prompt, a region selector, a "register or sign in" button that needs no password>`
+
+Log in with the method above. Do not assume Google SSO. Snapshot the session and keep it alive rather than asking me to log in again.
+
+## Accounts
+
+**Pick one of these two blocks and delete the other.**
+
+### Two accounts
+
+| Role | Account | Browser | MCP |
+|---|---|---|---|
+| A, attacker | `<email>` | Chrome | `browser-mcp` |
+| B, victim | `<email>` | Firefox | `claudecodebrowser` |
+
+Both mailboxes are open in their own browser for verification mail, invites and reset links. Chrome is primary; go to Firefox only for Account B's identifiers and to confirm an effect landed.
+
+### One account
+
+| Role | Account | Browser | MCP |
+|---|---|---|---|
+| A, only account | `<email>` | Chrome | `browser-mcp` |
+
+There is no second account this time. Do not mark the cross-account columns of the matrix as not-applicable. Work the single-account ladder in the `coverage-matrix` skill in order: try to create a second account, then find the second principal that already exists inside this one (roles, scoped API tokens, share links, invites, integrations, the pre-login state), then use the unauthenticated replay, which proves broken authorization with no second account and no exposure to anyone. Only after all three does a cell become `blocked: no second account`.
+
+`<If a second account can be created and I have not said otherwise, create one and tell me.>`
+`<If a second mailbox exists but is not logged in anywhere, say so and I will add it.>`
+
+## Harness
+
+These tune the bbh harness. All are optional; the defaults are shown.
+
+- **Rate limit:** `2` (requests per second per host; the sender never exceeds it, bursts included)
+- **OOB callback:** `none` (set `local 7731` for the built-in loopback listener, `listener <base-url> <poll-url>` for your own, or `interactsh <server>`. Without one, SSRF and XXE cells can only close `blocked: no_oob_listener`.)
+- **Burp proxy:** `127.0.0.1:8080` (set `none` to send direct; everything still lands in Burp when proxied)
+- **Burp MCP:** `http://127.0.0.1:9876` (the SSE endpoint ingest reads history from; `none` to disable Burp ingest)
+- **Max concurrent testers:** `3` (class-tester subagents at once; hard cap 25; they share one rate limiter)
+- **Support hosts:** `none` (extra hosts the agent may navigate to but not send test traffic to, beyond the auto-derived mailboxes/IdP/ngrok/loopback, e.g. a separate SSO domain)
+
+## Environment
+
+Assume Chrome, Firefox, Burp and Playwright are all available and both browsers are logged in as stated above.
+
+If one of them is not reachable, say so in one line, carry on with whatever does work, and re-probe when a task actually needs it. Do not stall the session on it and do not conclude the capability is missing. I fix these in the background and they come back mid-session.
+
+## Anything specific to this target
+
+`<Optional. A feature I want covered first, a known area of interest, a previous report to avoid duplicating, a tier or region that gates the interesting functionality.>`
+
+---
+
+# Worked example
+
+```markdown
+## Target
+
+- Asset: Acme Cloud
+- Scope: *.acme.example, api.acme.example
+- Out of scope: the marketing site, the status page
+- Programme: private
+- Marker header: none
+
+## Login
+
+- Method: email and password
+- Credentials: a@acme-test.example / <in my password manager, ask me>
+- Notes: after login it asks which workspace to open, pick "Testing"
+
+## Accounts
+
+### One account
+
+| Role | Account | Browser | MCP |
+|---|---|---|---|
+| A, only account | a@acme-test.example | Chrome | browser-mcp |
+
+There is no second account this time. Signup is open, so make a second one if you can.
+
+## Environment
+
+Assume everything is up. Firefox is not logged in to anything for this target, that is expected.
+
+## Anything specific to this target
+
+The API tokens feature is new. Start there.
+```

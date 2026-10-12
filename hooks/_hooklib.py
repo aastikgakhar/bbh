@@ -39,18 +39,17 @@ def read_input() -> dict:
 
 
 def engagement_dir(data: dict) -> Path:
+    """Resolve the engagement strictly from the hook payload's cwd (the session's
+    working directory, which is authoritative), not the hook process's own cwd."""
+    env = os.environ.get("BBH_ENGAGEMENT_DIR")
+    if env:
+        return Path(env).resolve()
     cwd = data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-    _server_on_path()
-    try:
-        from bbh.paths import find_engagement_dir
-
-        return find_engagement_dir(cwd)
-    except Exception:  # noqa: BLE001
-        p = Path(cwd)
-        for d in (p, *p.parents):
-            if (d / ".bbh").is_dir() or (d / "prompt.md").is_file():
-                return d
-        return p
+    p = Path(cwd).resolve()
+    for d in (p, *p.parents):
+        if (d / ".bbh").is_dir() or (d / "prompt.md").is_file():
+            return d
+    return p
 
 
 def is_engagement(root: Path) -> bool:

@@ -40,7 +40,8 @@ def body(data, root):
     state["last_progress_event"] = last_progress
     led.kv_set("stop_guard", state)
 
-    if state["blocks"] >= GUARD_LIMIT:
+    if state["blocks"] > GUARD_LIMIT:
+        # blocked GUARD_LIMIT times in a row with no progress between attempts; stop fighting it
         _write_stuck(led, root, work)
         _reset_guard(led)
         led.event("gate.allowed", detail={"reason": "no-progress guard", "blocks": state["blocks"]})
