@@ -401,8 +401,13 @@ def apply(base: Request, ops: list[dict], ref: InputRef, *, substitute: Callable
             if strip_auth:
                 strip_auth(req)
             else:
-                req.remove_header("Cookie")
-                req.remove_header("Authorization")
+                # remove the obvious auth headers even without a session-file-aware stripper, so a
+                # standalone strip_auth does not leave a custom auth header behind (S5). The sender's
+                # apply_principal('unauth') additionally strips every header named in a session file.
+                for hname in list(req.headers):
+                    k = hname[0].lower()
+                    if k in ("cookie", "authorization") or re.match(r"^(x-)?(csrf|xsrf|api-?key|auth|access-?token|session|user-token|amz-security-token|sid)", k):
+                        req.remove_header(hname[0])
             principal = "unauth"
         elif name == "set_cookie":
             _set_cookie(req, op["name"], str(sub(op["value"])))

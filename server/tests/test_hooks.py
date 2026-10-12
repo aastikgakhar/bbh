@@ -108,6 +108,23 @@ def test_verifier_signoff_denied_to_non_verifier_subagent(eng):
     assert out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
 
 
+def test_scope_fails_closed_when_ledger_unreadable(eng):
+    # corrupt the ledger so open_ledger raises; the scope guard must still DENY http(s) sends (C3)
+    (eng / ".bbh" / "ledger.db").write_bytes(b"not a database" * 100)
+    out, _, _ = run_hook("pre_tool_scope.py", {"cwd": str(eng), "tool_name": "mcp__browser-mcp__browser_navigate",
+                                               "tool_input": {"url": "http://evil.test/x"}}, eng)
+    hso = out.get("hookSpecificOutput", {})
+    assert hso.get("permissionDecision") == "deny" and "could not be read" in hso.get("permissionDecisionReason", "")
+
+
+def test_kill_switch_still_denies_with_unreadable_ledger(eng):
+    (eng / ".bbh" / "ledger.db").write_bytes(b"corrupt" * 100)
+    (eng / ".bbh" / "STOP").write_text("x")
+    out, _, _ = run_hook("pre_tool_scope.py", {"cwd": str(eng), "tool_name": "WebFetch",
+                                               "tool_input": {"url": "http://127.0.0.1:5057/x"}}, eng)
+    assert out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+
+
 def test_non_engagement_dir_is_noop(tmp_path):
     out, rc, _ = run_hook("pre_tool_scope.py", {"cwd": str(tmp_path), "tool_name": "WebFetch",
                                                 "tool_input": {"url": "https://example.com/"}}, tmp_path)

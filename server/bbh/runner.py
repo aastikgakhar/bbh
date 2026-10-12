@@ -266,6 +266,15 @@ def _run_browser_case(ledger, cell_id, case_no, planned, ctx, base, ref, sub, pr
     elif open_kind in ("request", None):
         mutated, _ = apply(base, planned["mutation"], ref, substitute=sub)
         url = mutated.url
+    # defence in depth (S6): the private browser's INITIAL navigation must be in scope (it
+    # carries the viewer's cookies). Redirects it then follows are the browser's own, and the
+    # cookies are domain-scoped, but never open an off-scope page ourselves.
+    from .scope import ScopeError
+    try:
+        ledger.scope().check_url(url)
+    except ScopeError as exc:
+        return _record_browser(ledger, cell_id, case_no, planned, "inconclusive",
+                               f"browser navigation target is out of scope, not opened: {exc}", cap_dir, stem, principal, need_cap=False)
     bviewer = bspec.get("principal", principal)
     where = None
     for key in ("fragment", "query"):

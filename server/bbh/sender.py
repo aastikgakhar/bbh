@@ -311,20 +311,26 @@ class Sender:
         ids = [str(i) for p in self.ledger.principals() for i in p["identifiers"] if str(i).isdigit() or len(str(i)) in (32, 36)]
         if ids:
             known_ids = set(ids)
-        g = guard.scan(ex.body_text, known, known_ids=known_ids) if ex.response is not None else guard.GuardResult()
+        if ex.response is not None:
+            header_text = "\n".join(f"{k}: {v}" for k, v in ex.response.headers)
+            g = guard.scan(ex.body_text, known, known_ids=known_ids, header_text=header_text)
+        else:
+            g = guard.GuardResult()
         redacted = False
         if g.third_party:
             redacted = True
-            ex.response = Response(status=ex.response.status, reason=ex.response.reason, headers=[
-                (k, v) for k, v in ex.response.headers if k.lower() not in ("content-length", "content-encoding")],
-                body=guard.redaction_body(g), http_version=ex.response.http_version)
+            scrubbed_headers = [(k, guard.scrub_headers_value(v, known)) for k, v in ex.response.headers
+                                if k.lower() not in ("content-length", "content-encoding")]
+            ex.response = Response(status=ex.response.status, reason=ex.response.reason,
+                                   headers=scrubbed_headers, body=guard.redaction_body(g),
+                                   http_version=ex.response.http_version)
             eid = endpoint_id
             if eid is None:
                 n = normalise(ex.request)
                 row = self.ledger.q1("SELECT id FROM endpoints WHERE origin = ? AND method = ? AND path_template = ?",
                                      (n.origin, n.method, n.path_template))
                 eid = row["id"] if row else None
-            if eid is not None and (vuln_class == "mass_dump" or g.count >= 2):
+            if eid is not None:  # any third-party hit locks the endpoint (design Section 8)
                 self.ledger.lock_third_party(eid, {"count": g.count, "proving_field": g.proving_field, "cell": cell_id})
         cap_path = Path(capture) if capture else self.paths.captures / "_recon" / f"{next(_SEQ):05d}-{ex.request.method}-{ex.request.host or 'host'}.http"
         cap_path = self.paths.abs(cap_path)

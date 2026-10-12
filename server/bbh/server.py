@@ -217,6 +217,16 @@ def _ensure_plan(led: Ledger, cell_id: int) -> list[dict]:
 
 
 @mcp.tool()
+def crawl(start_url: str, max_pages: int = 40, principal: str = "A") -> dict:
+    """Bounded recon crawl from start_url: follow same-origin, in-scope, GET links only (never logout/delete/destructive or static assets), capped at max_pages. Every fetch is scoped, rate-limited and ingested, so endpoints and inputs land in the ledger. Submits no forms."""
+    try:
+        from .crawl import crawl as do_crawl
+        return do_crawl(L(), _sender(), start_url, max_pages=max_pages, principal=principal)
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
 def send_case(cell_id: int, case_no: int, principal: str = "", value: str = "") -> dict:
     """Execute one generated case for a cell through the sender (or the private browser / OOB / counter-read, as the case specifies), evaluate its condition, and record the result. `value` overrides the payload for an ad-hoc probe."""
     try:

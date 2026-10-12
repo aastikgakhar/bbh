@@ -259,7 +259,7 @@ When base cells run out, `tasks.refill_depth()` adds items in this order (each d
 
 ## 11. Layer 7: MCP tools
 
-`status`, `next_task`, `ingest`, `plan`, `probe_reflection`, `send_case`, `run_cases`, `record_case`, `close_cell`, `release_cell`, `reopen_cell`, `verifier_signoff`, `open_finding`, `escalation_blocked`, `verify_finding`, `render_report`, `record_triage`, `add_principal`, `add_endpoint`, `set_feature`, `add_depth_item`, `complete_depth_item`, `oob_url`, `oob_check`, `fetch` (scoped captured request for recon), `crawl`, `browser_case` (private headless browser), `show` (one cell or finding with its cases and captures), `render_views`.
+`status`, `next_task`, `ingest`, `plan`, `probe_reflection`, `send_case`, `run_cases`, `record_case`, `close_cell`, `release_cell`, `reopen_cell`, `verifier_signoff`, `open_finding`, `escalation_blocked`, `verify_finding`, `render_report`, `record_triage`, `add_principal`, `add_endpoint`, `set_feature`, `add_depth_item`, `complete_depth_item`, `oob_url`, `oob_check`, `fetch` (scoped captured request for recon), `crawl` (bounded scoped recon crawl), `show` (one cell or finding with its cases and captures), `render_views`.
 
 `next_task` priority: (1) candidates, (2) findings needing verification, a report, or triage, (3) open cells on high-value surfaces (cross-principal classes, shared/public pages, state-changing endpoints), (4) the remaining open cells, (5) depth items, (6) recon refresh. The payload is the cell, endpoint, input, context, generated cases, the recipe excerpt from `classes.md`, and the exact completion criteria.
 
@@ -280,8 +280,8 @@ Hook mechanics common to all scripts: `hooks/hooks.json` runs `python "${CLAUDE_
 
 Agents (`agents/*.md`, tools listed explicitly because wildcard support in `tools:` was not verified):
 
-- `class-tester`: bbh tools (`next_task`, `show`, `run_cases`, `send_case`, `record_case`, `fetch`, `probe_reflection`, `browser_case`, `oob_url`, `oob_check`, `close_cell`, `release_cell`, `open_finding`, `escalation_blocked`, `add_depth_item`, `complete_depth_item`, `status`), Burp read tools, `Read`, `Grep`, `Glob`. No Bash, no real-browser tools; the hook also denies those to any subagent. The browser rule from CLAUDE.md is in the file verbatim.
-- `verifier`: `show`, `verify_finding`, `verifier_signoff`, `send_case`, `browser_case`, `oob_check`, `fetch`, Burp read tools, `Read`, `Grep`, `Glob`. Prompted to refute. The only agent the hook lets call `verifier_signoff`.
+- `class-tester`: bbh tools (`next_task`, `show`, `run_cases`, `send_case`, `record_case`, `fetch`, `probe_reflection`, `oob_url`, `oob_check`, `close_cell`, `release_cell`, `open_finding`, `escalation_blocked`, `add_depth_item`, `complete_depth_item`, `status`), Burp read tools, `Read`, `Grep`, `Glob`. No Bash, no real-browser tools; the hook also denies those to any subagent. The browser rule from CLAUDE.md is in the file verbatim.
+- `verifier`: `show`, `verify_finding`, `verifier_signoff`, `send_case`, `oob_check`, `fetch`, Burp read tools, `Read`, `Grep`, `Glob`. Prompted to refute. The only agent the hook lets call `verifier_signoff`.
 - `triager`: `Read`, `Glob`, `Grep` only. Body is `triage-gate/references/agent-brief.md` verbatim, plus the browser rule.
 
 Concurrency: `prompt.md` `Max concurrent testers` (default 3, hard cap 25). All testers share one sender and one cross-process rate limiter, so more testers never means more load on the target.

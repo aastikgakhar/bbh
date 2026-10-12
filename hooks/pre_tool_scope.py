@@ -94,13 +94,16 @@ def body(data, root):
 
     # scope + scheme checks on URLs
     led = None
+    scope_unavailable = False
     try:
         led = h.open_ledger(root)
         scope = led.scope()
         eng = led.engagement()
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
         scope = None
         eng = {}
+        scope_unavailable = True
+        h.log(root, "pre_tool_scope", f"ledger unavailable, failing closed for http(s) sends: {exc}")
     support = set((eng.get("support_hosts") or []))
 
     urls, is_nav, is_fetch, is_burp_host = [], False, False, None
@@ -127,6 +130,12 @@ def body(data, root):
             h.deny(f"bbh: navigation to {u.split(':',1)[0]}: scheme is blocked (local-file/script/data access).")
             return
         if scope is None:
+            # Fail CLOSED: the one guard that keeps the browser on-target must not let an
+            # http(s) send through just because the ledger could not be read. (C3)
+            if scope_unavailable and u.lower().startswith(("http://", "https://")):
+                h.deny("bbh: the engagement ledger could not be read, so scope cannot be checked right now. "
+                       "This send is refused until it is readable again (retry in a moment). Touch .bbh/STOP to stop entirely.")
+                return
             continue
         try:
             scope.check_url(u)

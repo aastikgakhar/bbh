@@ -51,10 +51,12 @@ def _is_foreign_email(e: str, known: set[str]) -> bool:
     return True
 
 
-def scan(body_text: str, known_identifiers: set[str], *, known_ids: set[str] | None = None) -> GuardResult:
+def scan(body_text: str, known_identifiers: set[str], *, known_ids: set[str] | None = None,
+         header_text: str = "") -> GuardResult:
     """known_identifiers: lowercase emails/handles of the test principals.
     known_ids: object/user ids that belong to test principals (strings). When it is
-    None, id-based detection is skipped (unknown ids are not evidence)."""
+    None, id-based detection is skipped (unknown ids are not evidence).
+    header_text: response header lines; foreign e-mails there are detected too (C2)."""
     res = GuardResult()
     data = None
     stripped = body_text.lstrip()[:1]
@@ -76,35 +78,63 @@ def scan(body_text: str, known_identifiers: set[str], *, known_ids: set[str] | N
             res.third_party = True
             res.count = foreign_records
             return res
-    emails = sorted({e for e in EMAIL_RE.findall(body_text) if _is_foreign_email(e, known_identifiers)})
+    emails = sorted({e for e in EMAIL_RE.findall(body_text + "\n" + (header_text or ""))
+                     if _is_foreign_email(e, known_identifiers)})
     if emails:
         res.third_party = True
         res.count = len(emails)
         res.foreign_emails = [_mask_email(e) for e in emails[:3]]
-        res.proving_field = f"email={_mask_email(emails[0])}"
+        where = "header" if (header_text and emails[0] in header_text and emails[0] not in body_text) else "body"
+        res.proving_field = f"email={_mask_email(emails[0])} ({where})"
     return res
 
 
-def _records(data) -> list[dict]:
+def _records(data, depth: int = 0) -> list[dict]:
+    """The row-list to inspect: the top-level list, or the first list-of-dicts found
+    at any reasonable nesting depth (S2: a dump nested under a key is still a dump)."""
     if isinstance(data, list):
         return [r for r in data if isinstance(r, dict)]
     if isinstance(data, dict):
         for v in data.values():
             if isinstance(v, list) and v and all(isinstance(x, dict) for x in v):
                 return v
+        if depth < 4:
+            for v in data.values():
+                if isinstance(v, dict):
+                    nested = _records(v, depth + 1)
+                    if nested:
+                        return nested
         return [data]
     return []
 
 
 def _foreign_in_record(rec: dict, known: set[str], known_ids: set[str] | None) -> str | None:
     for k, v in rec.items():
-        if isinstance(v, str) and EMAIL_KEYS.search(k) and EMAIL_RE.fullmatch(v.strip()) and _is_foreign_email(v.strip(), known):
-            return f"{k}={_mask_email(v.strip())}"
-        if known_ids is not None and OWNER_KEYS.match(k) and isinstance(v, (int, str)) and str(v) not in known_ids:
-            return f"{k}={str(v)[:2]}***"
-        if isinstance(v, str) and EMAIL_RE.fullmatch(v.strip() or "") and _is_foreign_email(v.strip(), known):
-            return f"{k}={_mask_email(v.strip())}"
+        # an e-mail value owned by a test account is NOT third-party, whatever the key
+        if isinstance(v, str) and EMAIL_RE.fullmatch(v.strip() or ""):
+            if _is_foreign_email(v.strip(), known):
+                return f"{k}={_mask_email(v.strip())}"
+            continue  # own / role e-mail: not foreign
+        # owner-style id fields: a value equal to a known test identifier (id OR handle) is own data.
+        if OWNER_KEYS.match(k) and isinstance(v, (int, str)):
+            sv = str(v)
+            if sv.lower() in known:
+                continue  # the test account's own handle/id
+            if known_ids is not None and sv not in known_ids and not _is_email(sv):
+                return f"{k}={sv[:2]}***"
     return None
+
+
+def _is_email(s: str) -> bool:
+    return bool(EMAIL_RE.fullmatch((s or "").strip()))
+
+
+def scrub_headers_value(value: str, known: set[str]) -> str:
+    """Mask any foreign e-mail in a response header value before it is written to disk (C2)."""
+    def repl(m):
+        e = m.group(0)
+        return _mask_email(e) if _is_foreign_email(e, known) else e
+    return EMAIL_RE.sub(repl, value or "")
 
 
 def redaction_body(res: GuardResult) -> bytes:
