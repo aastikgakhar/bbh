@@ -1,0 +1,12 @@
+{
+  "name": "bbh-local",
+  "owner": { "name": "bug bounty researcher" },
+  "plugins": [
+    {
+      "name": "bbh",
+      "version": "0.1.0",
+      "description": "Ledger, scoped sender, case generators, and hooks that enforce the engagement methodology.",
+      "source": "./"
+    }
+  ]
+}

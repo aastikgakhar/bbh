@@ -1,0 +1,7 @@
+{
+  "name": "bbh",
+  "version": "0.1.0",
+  "description": "Bug bounty discipline harness: a ledger, scoped sender, and hooks that enforce the per-engagement methodology instead of leaving it to memory.",
+  "author": { "name": "bug bounty researcher" },
+  "hooks": "./hooks/hooks.json"
+}

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "bbh": {
+      "command": "python",
+      "args": ["-m", "bbh.server"],
+      "env": {
+        "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/server",
+        "BBH_ENGAGEMENT_DIR": "${CLAUDE_PROJECT_DIR}"
+      }
+    }
+  }
+}

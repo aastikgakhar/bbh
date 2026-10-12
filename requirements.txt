@@ -1,0 +1,10 @@
+# bbh server + tools. Python 3.11+.
+# FastMCP lives in mcp.server.fastmcp in mcp 1.x; mcp 2.x renamed it to MCPServer, so pin <2.
+mcp>=1.26,<2
+httpx>=0.27
+h2>=4
+truststore>=0.9        ; python_version >= "3.10"
+websocket-client>=1.7  # private headless browser CDP client
+# standard-library only otherwise. For the lab and the tests:
+flask>=3
+pytest>=8

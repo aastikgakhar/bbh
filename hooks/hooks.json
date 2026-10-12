@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact|clear",
+        "hooks": [
+          { "type": "command", "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\"", "timeout": 10 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__browser-mcp__.*|mcp__claudecodebrowser__.*|mcp__claude-in-chrome__.*|mcp__burp__.*|mcp__plugin_bbh_bbh__.*|mcp__claude_ai_.*|WebFetch|Bash|PowerShell|Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/pre_tool_scope.py\"", "timeout": 10 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__browser-mcp__.*|mcp__claudecodebrowser__.*|mcp__claude-in-chrome__.*|mcp__burp__.*|mcp__plugin_bbh_bbh__.*",
+        "hooks": [
+          { "type": "command", "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_ingest.py\"", "timeout": 12 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_gate.py\"", "timeout": 15 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent_stop.py\"", "timeout": 12 }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py\"", "timeout": 15 }
+        ]
+      }
+    ]
+  }
+}
