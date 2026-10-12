@@ -1,5 +1,6 @@
 {
   "name": "bbh-local",
+  "description": "Local marketplace hosting the bbh bug-bounty engagement harness plugin.",
   "owner": { "name": "bug bounty researcher" },
   "plugins": [
     {
