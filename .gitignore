@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.bbh/
+lab/run*/
+lab/.state/
+*.db
+*.db-wal
+*.db-shm
