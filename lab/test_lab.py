@@ -110,10 +110,12 @@ def test_bug7_csrf_text_plain(client):
     assert b"csrf-name" in client.get("/api/settings").data     # state changed via text/plain, no token
 
 
+# the Flask test client's request host is "localhost", which the redirect allowlists as its own
+# host; the userinfo bypass keeps split('@')[0], so https://localhost@evil.test passes.
 @pytest.mark.parametrize("url,ok", [
-    ("https://lab.test@evil.test", True),
-    ("//evil.test", False), ("https:/\\evil.test", False), ("https://lab.test.evil.test", False),
-    ("https://evil.test%23@lab.test", False), ("/\\/evil.test", False), ("\\\\evil.test", False),
+    ("https://localhost@evil.test", True),
+    ("//evil.test", False), ("https:/\\evil.test", False), ("https://localhost.evil.test", False),
+    ("https://evil.test%23@localhost", False), ("/\\/evil.test", False), ("\\\\evil.test", False),
     ("https://evil.test", False),
 ])
 def test_bug8_open_redirect_only_userinfo(client, url, ok):

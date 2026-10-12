@@ -15,30 +15,32 @@ Run against the planted-bug lab (10 bugs, 3 decoys) with the real harness module
 
 ## Per-class detail
 
-| bug | class | expected | harness verdict |
-|---|---|---|---|
-| 10 | htmli_stored | confirmed | candidate |
-| 10 | xss_stored | negative | open |
-| 1 | csti | negative | open |
-| 1 | htmli | confirmed | candidate |
-| 1 | ssti | negative | open |
-| 1 | xss_reflected | negative | open |
-| 2 | csti | negative | open |
-| 2 | htmli | negative | open |
-| 2 | ssti | confirmed | candidate |
-| 2 | xss_reflected | negative | open |
-| 3 | sqli | confirmed | candidate |
-| 4 | nosqli | confirmed | candidate |
-| 5a | idor_read | confirmed | candidate |
-| 5b | idor_write | confirmed | candidate |
-| 6 | idor_write | negative | open |
-| 7 | csrf | confirmed | candidate |
-| 8 | open_redirect | confirmed | candidate |
-| 9 | mass_dump | confirmed | candidate |
-| D1 | htmli | negative | open |
-| D1 | xss_reflected | negative | open |
-| D2 | sqli | negative | candidate |
-| D3 | open_redirect | negative | open |
+`reached reportable rung` is the real verdict: a cell can be a weak `candidate` from a sub-reportable signal (e.g. a SQL error-differential on decoy D2) without ever reaching a reportable finding, which is the methodology working, not a false positive.
+
+| bug | class | expected | cell state | reached reportable rung |
+|---|---|---|---|---|
+| 10 | htmli_stored | confirmed | candidate | True |
+| 10 | xss_stored | negative | open | False |
+| 1 | csti | negative | open | False |
+| 1 | htmli | confirmed | candidate | True |
+| 1 | ssti | negative | open | False |
+| 1 | xss_reflected | negative | open | False |
+| 2 | csti | negative | open | False |
+| 2 | htmli | negative | open | False |
+| 2 | ssti | confirmed | candidate | True |
+| 2 | xss_reflected | negative | open | False |
+| 3 | sqli | confirmed | candidate | True |
+| 4 | nosqli | confirmed | candidate | True |
+| 5a | idor_read | confirmed | candidate | True |
+| 5b | idor_write | confirmed | candidate | True |
+| 6 | idor_write | negative | open | False |
+| 7 | csrf | confirmed | candidate | True |
+| 8 | open_redirect | confirmed | candidate | True |
+| 9 | mass_dump | confirmed | candidate | True |
+| D1 | htmli | negative | open | False |
+| D1 | xss_reflected | negative | open | False |
+| D2 | sqli | negative | candidate | False |
+| D3 | open_redirect | negative | open | False |
 
 ## Ledger counts at end
 
