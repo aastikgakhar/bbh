@@ -160,14 +160,19 @@ def add_endpoint(method: str, url: str, source: str = "guess", feature: str = ""
     try:
         led = L()
         from urllib.parse import urlsplit
+        from .httpraw import Request
+        from .normalise import normalise
         p = urlsplit(url)
         origin = f"{p.scheme}://{p.netloc}"
-        from .normalise import path_template
-        tpl, _ = path_template(p.path or "/")
-        eid, created = led.upsert_endpoint(origin=origin, method=method.upper(), path_template=tpl, source=source,
-                                           feature=feature or None, content_type=content_type or None)
+        n = normalise(Request(method=method.upper(), url=url, headers=[("Host", p.netloc)]))
+        eid, created = led.upsert_endpoint(origin=n.origin, method=n.method, path_template=n.path_template,
+                                           source=source, feature=feature or None,
+                                           content_type=content_type or None, flags=n.flags)
+        for spec in n.inputs:  # path params and query inputs from the URL
+            led.upsert_input(endpoint_id=eid, name=spec.name, location=spec.location, json_path=spec.json_path,
+                             sample_value=spec.sample, value_type=spec.vtype)
         pr = plan_endpoint(led, eid)
-        return {"ok": True, "endpoint_id": eid, "created": created, "opened": pr.opened}
+        return {"ok": True, "endpoint_id": eid, "created": created, "inputs": len(n.inputs), "opened": pr.opened}
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 

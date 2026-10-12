@@ -186,7 +186,18 @@ async def _burp_fetch(url: str, regex: str | None, start: int, max_records: int,
 
 
 def fetch_burp(url: str, regex: str | None, start: int, *, max_records: int = 500, page: int = 50, budget_s: float = 60.0) -> list[tuple[int, str]]:
-    return asyncio.run(_burp_fetch(url, regex, start, max_records, page, time.monotonic() + budget_s))
+    coro = lambda: _burp_fetch(url, regex, start, max_records, page, time.monotonic() + budget_s)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro())
+    # Called from inside a running event loop (the MCP server): run in a private thread with its own loop.
+    import concurrent.futures
+
+    def _run():
+        return asyncio.new_event_loop().run_until_complete(coro())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(_run).result(timeout=budget_s + 30)
 
 
 # --- recording -------------------------------------------------------------------------------------------------
