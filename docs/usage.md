@@ -1,6 +1,6 @@
 # Using bbh
 
-bbh is a Claude Code plugin that turns the bug-bounty methodology in `.claude/CLAUDE.md` and the four skills into something the harness enforces: a SQLite ledger that is the source of truth, a scoped and rate-limited sender, case generators for 32 vulnerability classes, and hooks that inject the next task, guard scope, lint reports, and refuse to let the session stop while work is open.
+bbh is a Claude Code plugin that turns the bug-bounty methodology in `.claude/CLAUDE.md` and the four skills into something the harness enforces: a SQLite ledger that is the source of truth, a scoped and rate-limited sender, case generators for 33 vulnerability classes, and hooks that inject the next task, guard scope, lint reports, and refuse to let the session stop while work is open.
 
 ## Install once
 

@@ -10,7 +10,7 @@ It is built for a specific, legal use: **authorized** black-box / grey-box testi
 
 - **A ledger as the single source of truth** (`.bbh/ledger.db`, SQLite/WAL). One row per `(endpoint, input, vuln-class)` cell. Closing a class on one input never touches its siblings. Every state change is an append-only event.
 - **31 MCP tools** over that ledger. The loop is `status` -> `next_task` -> `run_cases`/`send_case` -> `close_cell` or `open_finding` -> `verify_finding` -> `render_report`. Each tool refuses an invalid transition and tells you exactly what is missing.
-- **A planner** that opens the right cells from each request/response shape, and **generators for 32 vulnerability classes** (SQLi, XSS, IDOR, CSRF, SSRF, mass-dump, and more). Every class gets at least 10 cases over 5 techniques plus a positive control before it can close negative.
+- **A planner** that opens the right cells from each request/response shape, and **generators for 33 vulnerability classes (incl. command injection/RCE)** (SQLi, XSS, IDOR, CSRF, SSRF, mass-dump, and more). Every class gets at least 10 cases over 5 techniques plus a positive control before it can close negative.
 - **One scoped sender.** Scope and Rule 0 (no third-party data) are checked in code on every request; a kill switch stops all traffic instantly; one cross-process rate limiter caps load no matter how many sub-agents run.
 - **Hooks** that survive compaction (they re-inject the next task), block out-of-scope navigation, deny sub-agents the researcher's real browser, lint every `report-*.md` into the house format, and block the Stop while cells are open.
 - **Generated views** you open in any editor: `feature-matrix.md` (the coverage grid = definition of done), `state.csv`, `findings-summary.md`, `progress.log`. No live dashboard, no extra listening socket.
@@ -106,6 +106,17 @@ bbh is a self-contained git repo and the plugin is portable (every path inside i
 3. Load the plugin: `/plugin marketplace add <path-to-bbh>` then `/plugin install bbh@bbh-local` (or `claude --plugin-dir <path-to-bbh>` per session).
 
 That is all bbh needs. Your own `.claude/` folder (the `CLAUDE.md` methodology and your settings) is separate and travels with you as before; the plugin adds the ledger, tools, and hooks on top of it. Your per-target workflow is unchanged: one engagement folder per target, a filled `prompt.md` in it, and say `go`.
+
+## Improvements from field use (2026-10-13)
+
+After a full real-target engagement (`feedback.md`), the operational layer was hardened:
+
+- **Stopping that never traps the session.** `.bbh/STOP` now brakes only network/test traffic (local disk, docs and read-only tools keep working, and the agent can `rm` it); `.bbh/PAUSE` is a clean soft stop; the Stop gate's escape triggers on the open-work total not dropping, so background churn can't make it block every turn. This was the biggest token sink.
+- **Reload-safety.** `status()` carries a code fingerprint and warns when the running server is stale; a new `reload()` tool refreshes the generators/evaluator in place; an unknown condition type is loud, never a silent negative.
+- **Ingest hygiene.** The sender signs every request so Burp's auto-ingest never turns bbh's own test traffic into endpoints — the matrix converges.
+- **Fewer false positives.** Injection probes can't score alone, 4xx type-rejections aren't differentials, empty-200s don't read as leaks, and a variable-response endpoint no longer trips every baseline comparison.
+- **More reach.** Single-account IDOR via sequential enumeration; minimal non-destructive PoC payloads (LFI `/etc/passwd`+`win.ini`, RCE `id`/`whoami`/`sleep`, SQLi version/db-name); a 500/501 escalates to the deeper injection classes; and a cross-class **chaining engine** (`chains()`) that composes findings into multi-step attacks (open-redirect→token-exfil, XSS→ATO, …).
+- **Lower contention.** Default 2 tester lanes (hard cap 10), a lane left free for the verifier, and a candidate parks `blocked: verifier_unavailable` rather than freezing the board during an outage.
 
 ## Safety
 
