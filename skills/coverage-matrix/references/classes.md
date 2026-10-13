@@ -19,6 +19,8 @@ For every object type the app has (page, record, database, workspace, file, comm
 - Object type confusion: pass an ID of a different resource type into the same parameter.
 - ID format attacks: sequential neighbours of your own ID, a UUID with one character changed, a base64 or hex ID decoded and re-encoded, an ID from a different environment.
 
+**Single account is not a dead end.** With one account the harness still enumerates: it reads the neighbours of your own numeric id as yourself, and the Rule 0 third-party guard turns any record belonging to someone outside the test accounts into the confirmation (stopping at the first such record, keeping only the count plus one proving field). It never pages a stranger's data. The two-account cross-read is stronger when a second principal exists, but its absence is not "blocked", it is "test what one account can".
+
 **Two error messages are a finding by themselves.** If "not yours" and "not found" produce different responses, status codes, or timings, authorization is being evaluated after lookup, and that difference is an existence oracle that needs no target object at all.
 
 **Validation order matters.** On many APIs input is validated before authorization, so a `422` on a malformed cross-account request proves nothing. Resend with a valid payload before concluding anything.
@@ -48,11 +50,22 @@ The class that pays most and gets skipped most. For every list, search, export, 
 
 Every parameter that plausibly reaches a datastore: search terms, filters, sort fields, column names, IDs, pagination values, JSON body fields, and header values.
 
-- Time-based and boolean-based confirmation only. Never report from an error message alone.
+- Time-based and boolean-based confirmation only. Never report from an error message alone. Boolean SQLi is a *response differential*, not a status flip: a true/false pair can be two 200s whose bodies differ, so compare bodies, never require a 404/500.
 - Test the sort and order-by parameters specifically; they are concatenated far more often than `WHERE` clauses.
 - JSON body fields and headers, not just query strings.
 - NoSQL operators in JSON bodies: `$ne`, `$gt`, `$regex`, `$where`, `$in`, and the array-versus-string type juggle on login endpoints.
 - Second-order: store the payload through one endpoint, trigger it through another that reads it back.
+- For the PoC, extract **metadata only** (DB version / database name) via the `data_extraction` rung. That is enough to prove impact and stays inside Rule 0 — never dump user rows.
+
+---
+
+## Command injection (RCE)
+
+Inputs whose value plausibly reaches a shell or OS command: host/domain/IP fields that feed `ping`/`nslookup`/`dig`, filename and archive parameters that feed `convert`/`tar`/`zip`, export/report jobs, and anything named `cmd`/`exec`/`run`. The harness also opens this class automatically on any input that returns a 500/501 to a payload (a server error is a strong backend-reachability signal).
+
+- Prove execution **non-destructively**: run only `id` or `whoami` and detect their unmistakable output (`uid=…gid=…`, a service-account name), or run a benign `sleep`/`timeout` delay and measure it against the baseline for a blind proof.
+- Vary the separator: `;`, `|`, `&&`, `$(…)`, backticks, and a newline. One shape reaching the shell is enough.
+- Never run anything that reads a sensitive file, writes, deletes, or exfiltrates — the safety screen enforces this, and a report needs only the identity/delay proof.
 
 ---
 
@@ -126,7 +139,8 @@ Any parameter accepting a URL, hostname, IP or file reference: image proxies, th
 - Extension, MIME and magic-byte bypass, independently and in combination.
 - SVG containing script. Test whether it is served inline or with `Content-Disposition: attachment`.
 - Polyglots: a valid image that is also valid HTML or JS.
-- Path traversal in the filename, and in export and thumbnail paths.
+- Path traversal in the filename, and in export and thumbnail paths. Vary the dot-dot encoding (`../`, `..%2f`, `..%252f`, `....//`, backslash) and compare against the normalisation baseline.
+- LFI proof: the `traversal_reads_app_file` rung reads an app-owned file; the `lfi_reads_system_file` rung reads one of the two canonical world-readable proof files, `/etc/passwd` or `win.ini`, detected by each file's signature. Those two are the read-only PoC — never go after `/etc/shadow`, `boot.ini`, or anything under `system32`.
 - Where do uploads land, what origin serves them, and is that origin sandboxed? An upload rendered on the primary origin is worth far more than one on a separate CDN host.
 - Overwrite another object's file by reusing its identifier or path.
 
@@ -156,3 +170,20 @@ Unkeyed headers (`X-Forwarded-Host`, `X-Forwarded-Scheme`, `X-Original-URL`, `X-
 - An identifier leaked in a `Referer` header, or a `userId` that maps to an email through any other endpoint, is a chain link worth keeping.
 
 **A secret that only reaches the target's own analytics, error tracker or ad platform is not a finding.** The attacker cannot read that destination. Say so and move on.
+
+---
+
+## Chaining (cross-class)
+
+A single finding is often only worth a chain. The harness runs a chaining engine that composes the capabilities of your candidate/confirmed cells with signals seen in traffic, and queues each viable chain as a depth task with a test plan; `chains()` lists them and `findings-summary.md` records them. The payoff of a chain is almost always an outbound exfiltration or a cross-site effect, so the ledger cannot confirm it for you — you build the hosted PoC (see CLAUDE.md "Hosting a PoC") and prove the secret actually leaves or the state actually changes.
+
+The highest-value chains it looks for:
+
+- **Open redirect + a token in a URL / an OAuth flow -> credential exfiltration.** The redirect carries the victim's `code`/`access_token`/session to your collector. A redirect that forwards no secret is informational; prove the secret leaves.
+- **Open redirect + a server-side fetcher -> SSRF**, by making the fetcher follow the 3xx to a host its allowlist forbade.
+- **XSS -> ATO**, by reading a script-reachable session cookie or token and showing it authenticates as the victim; **XSS -> CSRF**, by issuing the state change from script to defeat SameSite.
+- **Permissive CORS -> cross-origin data theft** (after checking SameSite/Secure do not already block the credentialed request).
+- **A leaked credential/identifier -> privilege escalation**, used against the endpoint it authorises, with the test principals only.
+- **Response splitting -> cache poisoning**; **stored XSS -> cross-principal impact**; **RCE -> read a config secret off disk, then use it** (read-only, app-owned files only).
+
+Keep every chain link, including the ones that are out of scope alone (forced login/logout), in `bug-name-chain.md` as chain material.
