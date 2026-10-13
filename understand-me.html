@@ -1,0 +1,410 @@
+<title>How bbh Works</title>
+<meta name="description" content="An animated, plain-language tour of the bbh bug-bounty harness: who does what, and how one test travels from a hunch to a confirmed report.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a vertical "mission briefing" — hero, cast, a live request/response loop, a step walkthrough, the rails, and why-a-plugin. */
+:root{
+  --bg:#eef2f7; --surface:#ffffff; --surface-2:#f6f9fc; --ink:#11203a;
+  --muted:#53647f; --line:#d7e0ec; --accent:#2f6bff; --accent-soft:rgba(47,107,255,.12);
+  --guard:#b4530e; --guard-soft:rgba(180,83,14,.12); --good:#157a3b; --good-soft:rgba(21,122,59,.12);
+  --shadow:0 1px 2px rgba(16,32,60,.06),0 8px 24px rgba(16,32,60,.07);
+  --font-display:'Sora',system-ui,sans-serif; --font-body:'IBM Plex Sans',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --maxw:1080px; --r:14px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#090e18; --surface:#111a2b; --surface-2:#0d1526; --ink:#e9eff8; --muted:#95a5bf;
+  --line:#243149; --accent:#6a9fff; --accent-soft:rgba(106,159,255,.16);
+  --guard:#f0a35e; --guard-soft:rgba(240,163,94,.15); --good:#53d184; --good-soft:rgba(83,209,132,.15);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45); color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#090e18; --surface:#111a2b; --surface-2:#0d1526; --ink:#e9eff8; --muted:#95a5bf;
+  --line:#243149; --accent:#6a9fff; --accent-soft:rgba(106,159,255,.16);
+  --guard:#f0a35e; --guard-soft:rgba(240,163,94,.15); --good:#53d184; --good-soft:rgba(83,209,132,.15);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45); color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);
+  line-height:1.6;-webkit-font-smoothing:antialiased;font-size:16px}
+.wrap{max-width:var(--maxw);margin:0 auto;padding-inline:20px}
+section{padding-block:clamp(44px,7vw,84px)}
+h1,h2,h3{font-family:var(--font-display);line-height:1.1;text-wrap:balance;margin:0}
+a{color:var(--accent)}
+.eyebrow{font-family:var(--font-mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--accent);font-weight:500;margin:0 0 14px}
+.lead{color:var(--muted);font-size:clamp(16px,2.1vw,19px);max-width:62ch}
+.muted{color:var(--muted)}
+
+/* ---------- hero ---------- */
+.hero{border-bottom:1px solid var(--line);background:
+  radial-gradient(120% 90% at 85% -10%,var(--accent-soft),transparent 60%)}
+.hero h1{font-size:clamp(34px,6.4vw,62px);font-weight:800;letter-spacing:-.02em;margin:0 0 18px}
+.hero .lead{font-size:clamp(17px,2.4vw,21px)}
+.tagrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:26px}
+.tag{font-family:var(--font-mono);font-size:12.5px;border:1px solid var(--line);background:var(--surface);
+  color:var(--muted);padding:6px 11px;border-radius:999px}
+.tag b{color:var(--ink);font-weight:600}
+/* hero signal strip */
+.sig{margin-top:34px;position:relative;height:3px;border-radius:3px;background:var(--line);overflow:visible}
+.sig::before{content:"";position:absolute;inset:0;border-radius:3px;
+  background:linear-gradient(90deg,transparent,var(--accent-soft),transparent)}
+.sig i{position:absolute;top:50%;left:0;width:12px;height:12px;border-radius:50%;background:var(--accent);
+  transform:translate(-50%,-50%);box-shadow:0 0 0 5px var(--accent-soft)}
+
+/* ---------- cast ---------- */
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;
+  box-shadow:var(--shadow)}
+.card .ico{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;margin-bottom:14px;
+  background:var(--accent-soft);color:var(--accent)}
+.card .ico svg{width:20px;height:20px;display:block}
+.card .role{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted)}
+.card h3{font-size:19px;font-weight:700;margin:2px 0 8px}
+.card p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55}
+.card.is-plugin .ico{background:var(--good-soft);color:var(--good)}
+
+/* ---------- pipeline (the live loop) ---------- */
+.diagram-wrap{overflow-x:auto;padding-bottom:6px}
+.pipe{min-width:760px;position:relative;margin-top:10px}
+.lane{display:flex;align-items:stretch;gap:0}
+.node{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 12px;
+  text-align:center;position:relative;z-index:2;min-width:0}
+.node .nlabel{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.node .nname{font-family:var(--font-display);font-weight:700;font-size:15px;margin:3px 0 4px}
+.node .nsub{font-size:12.5px;color:var(--muted);line-height:1.4}
+.node.accent{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.node.door{border-color:var(--good);box-shadow:0 0 0 3px var(--good-soft)}
+.node.door .nname{color:var(--good)}
+.arrow{flex:0 0 40px;align-self:center;position:relative;z-index:2;color:var(--muted);text-align:center}
+.arrow svg{width:26px;height:18px;display:block;margin:0 auto}
+/* plugin internals */
+.plugin{flex:1.5;border:1.5px solid var(--accent);border-radius:14px;background:
+  linear-gradient(180deg,var(--accent-soft),transparent);padding:12px;z-index:2}
+.plugin .ptitle{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--accent);text-align:center;margin-bottom:9px;font-weight:600}
+.chips{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.chip{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:7px 8px;text-align:center}
+.chip b{display:block;font-size:12.5px;font-weight:600}
+.chip span{font-size:10.5px;color:var(--muted);font-family:var(--font-mono)}
+.chip.ledger{grid-column:1/3;border-color:var(--good);background:var(--good-soft)}
+.chip.ledger b{color:var(--good)}
+/* the signal travelling the request path */
+.track{position:absolute;left:0;right:0;top:50%;height:0;z-index:1}
+.pulse{position:absolute;top:0;width:13px;height:13px;border-radius:50%;transform:translate(-50%,-50%);opacity:0}
+.pulse.req{background:var(--accent);box-shadow:0 0 0 6px var(--accent-soft)}
+.pulse.res{background:var(--good);box-shadow:0 0 0 6px var(--good-soft)}
+.cap{margin-top:16px;font-size:14px;color:var(--muted);text-align:center}
+.cap b{color:var(--ink);font-weight:600}
+.legend{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;margin-top:12px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+
+/* ---------- stepper ---------- */
+.steps{display:grid;grid-template-columns:1.1fr 1fr;gap:28px;align-items:start}
+.steplist{display:flex;flex-direction:column;gap:9px}
+.step{display:flex;gap:13px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);
+  border-radius:11px;padding:13px 15px;cursor:pointer;transition:border-color .25s,background .25s,transform .25s;
+  text-align:left;color:inherit;font:inherit;width:100%}
+.step .num{flex:0 0 26px;height:26px;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--font-mono);font-size:12.5px;font-weight:600;background:var(--surface-2);color:var(--muted);
+  border:1px solid var(--line);transition:all .25s}
+.step .stitle{font-family:var(--font-display);font-weight:600;font-size:15px}
+.step .sbody{font-size:13.5px;color:var(--muted);margin-top:2px;line-height:1.5}
+.step.is-active{border-color:var(--accent);background:var(--accent-soft);transform:translateX(4px)}
+.step.is-active .num{background:var(--accent);color:#fff;border-color:var(--accent)}
+.step.done .num{background:var(--good);color:#fff;border-color:var(--good)}
+.stage{position:sticky;top:16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:22px;box-shadow:var(--shadow);min-height:230px}
+.stage .snum{font-family:var(--font-mono);color:var(--accent);font-size:13px;letter-spacing:.12em}
+.stage h3{font-size:22px;font-weight:700;margin:6px 0 12px}
+.stage p{margin:0 0 14px;color:var(--muted);font-size:15px}
+.stage .term{font-family:var(--font-mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:9px;padding:11px 13px;color:var(--ink);white-space:pre-wrap;line-height:1.5}
+.stage .term .c{color:var(--accent)} .stage .term .g{color:var(--good)} .stage .term .m{color:var(--muted)}
+.controls{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.btn{font-family:var(--font-mono);font-size:13px;border:1px solid var(--line);background:var(--surface);
+  color:var(--ink);padding:8px 15px;border-radius:999px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.dots{display:flex;gap:7px}
+.dots i{width:9px;height:9px;border-radius:50%;background:var(--line);cursor:pointer;transition:background .2s,transform .2s}
+.dots i.on{background:var(--accent);transform:scale(1.25)}
+
+/* ---------- rails ---------- */
+.rails{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(248px,1fr))}
+.rail{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--guard);
+  border-radius:11px;padding:16px 18px}
+.rail .rt{font-family:var(--font-display);font-weight:600;font-size:15.5px;display:flex;align-items:center;gap:9px}
+.rail .rt code{font-family:var(--font-mono);font-size:12px;background:var(--guard-soft);color:var(--guard);
+  padding:2px 7px;border-radius:6px;font-weight:500}
+.rail p{margin:7px 0 0;color:var(--muted);font-size:14px}
+
+/* ---------- why a plugin ---------- */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.col{border-radius:14px;padding:22px;border:1px solid var(--line)}
+.col.soft{background:var(--surface-2)}
+.col.hard{background:var(--good-soft);border-color:var(--good)}
+.col h3{font-size:17px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:9px}
+.col.soft h3{color:var(--muted)} .col.hard h3{color:var(--good)}
+.col ul{margin:0;padding-left:18px;color:var(--muted);font-size:14px}
+.col li{margin-bottom:9px}
+.col li b{color:var(--ink);font-weight:600}
+
+/* ---------- footer ---------- */
+footer{border-top:1px solid var(--line);background:var(--surface-2)}
+footer .wrap{padding-block:40px}
+footer .sum{font-family:var(--font-display);font-weight:700;font-size:clamp(19px,3vw,26px);max-width:24ch;
+  line-height:1.25;margin-bottom:18px}
+footer .where{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+footer .where div{font-size:13.5px;color:var(--muted)}
+footer .where code{font-family:var(--font-mono);color:var(--ink);font-size:12.5px}
+
+@media (max-width:720px){
+  .steps{grid-template-columns:1fr} .stage{position:static}
+  .two{grid-template-columns:1fr}
+}
+/* motion only when the viewer welcomes it; the page is fully readable at rest */
+@media (prefers-reduced-motion:no-preference){
+  .sig i{animation:slide 3.4s cubic-bezier(.65,0,.35,1) infinite}
+  .pulse{animation-duration:4.2s;animation-timing-function:cubic-bezier(.6,0,.4,1);animation-iteration-count:infinite}
+  .pulse.req{animation-name:req} .pulse.res{animation-name:res;animation-delay:2.1s}
+  .node.pinging{animation:ping .5s ease}
+}
+@keyframes slide{0%{left:0}50%{left:100%}100%{left:0}}
+@keyframes req{0%{left:11%;opacity:0}8%{opacity:1}46%{left:78%;opacity:1}52%{opacity:0}100%{opacity:0}}
+@keyframes res{0%{left:78%;opacity:0}8%{opacity:1}46%{left:30%;opacity:1}52%{opacity:0}100%{opacity:0}}
+@keyframes ping{0%{box-shadow:0 0 0 0 var(--accent-soft)}100%{box-shadow:0 0 0 14px transparent}}
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Claude Code · plugin</p>
+    <h1>How bbh works</h1>
+    <p class="lead">bbh turns a bug-bounty playbook from advice an AI can forget into rules the tooling enforces.
+      Here is who does what — and how one test travels from a hunch to a confirmed, submittable report.</p>
+    <div class="tagrow">
+      <span class="tag"><b>33</b> vuln classes</span>
+      <span class="tag"><b>31</b> ledger tools</span>
+      <span class="tag"><b>6</b> safety hooks</span>
+      <span class="tag"><b>1</b> scoped door to the target</span>
+    </div>
+    <div class="sig" aria-hidden="true"><i></i></div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Who's who</p>
+    <h2 style="font-size:clamp(26px,4vw,38px);font-weight:800;margin-bottom:10px">The cast</h2>
+    <p class="lead" style="margin-bottom:30px">Six players. Five of them you already know; the sixth — the plugin — is the new part that keeps the other five honest.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></div>
+        <div class="role">You</div><h3>The researcher</h3>
+        <p>You hold the invitation to test a target. You name it in <code>prompt.md</code>, log in, and say “go”. Everything else runs for you.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></div>
+        <div class="role">The agent</div><h3>Claude Code</h3>
+        <p>The AI in your terminal that reads, decides and acts. It is the brain of the operation — but on its own it forgets the method halfway through.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z"/><path d="M8 7h7M8 11h7"/></svg></div>
+        <div class="role">The playbook</div><h3>The skills</h3>
+        <p>Four written guides — <b>recon</b>, <b>coverage-matrix</b>, <b>report-writer</b>, <b>triage-gate</b> — that tell Claude how a professional works a target, step by step.</p>
+      </div>
+      <div class="card is-plugin">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <div class="role">The enforcer</div><h3>The bbh plugin</h3>
+        <p>Turns the playbook into code: a memory that can’t be argued with, one guarded door to the target, and a rule every step has to pass before it counts.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l7 16 2-6 6-2z"/></svg></div>
+        <div class="role">Hands &amp; eyes</div><h3>The other MCPs</h3>
+        <p><b>browser-mcp</b> (Chrome), <b>claudecodebrowser</b> (Firefox), <b>Burp</b> (the proxy) and <b>claude-in-chrome</b> — they click, capture and watch the real traffic.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14 0 18M12 3c-3 3.5-3 14 0 18"/></svg></div>
+        <div class="role">In scope only</div><h3>The target</h3>
+        <p>The app you are authorized to test. Nothing bbh sends ever leaves its scope, and no stranger’s data is ever read.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <p class="eyebrow">The big picture</p>
+    <h2 style="font-size:clamp(26px,4vw,38px);font-weight:800;margin-bottom:10px">One loop, running all session</h2>
+    <p class="lead" style="margin-bottom:26px">Claude drives the plugin. Every request leaves through a single scoped, rate-limited door. Every response comes straight back into the ledger — the one source of truth. Then it repeats, cell by cell, until the whole map is tested.</p>
+    <div class="diagram-wrap">
+      <div class="pipe">
+        <div class="track" aria-hidden="true"><span class="pulse req"></span><span class="pulse res"></span></div>
+        <div class="lane">
+          <div class="node"><div class="nlabel">You</div><div class="nname">Researcher</div><div class="nsub">picks the target in prompt.md</div></div>
+          <div class="arrow" aria-hidden="true"><svg viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9h20m-5-5 5 5-5 5"/></svg></div>
+          <div class="node accent" id="n-claude"><div class="nlabel">Agent + skills</div><div class="nname">Claude Code</div><div class="nsub">reads the playbook, decides the next move</div></div>
+          <div class="arrow" aria-hidden="true"><svg viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9h20m-5-5 5 5-5 5"/></svg></div>
+          <div class="plugin" id="n-plugin">
+            <div class="ptitle">the bbh plugin</div>
+            <div class="chips">
+              <div class="chip"><b>next&nbsp;task</b><span>tools</span></div>
+              <div class="chip"><b>case gens</b><span>33 classes</span></div>
+              <div class="chip"><b>hooks</b><span>guardrails</span></div>
+              <div class="chip door-chip"><b>sender</b><span>one door</span></div>
+              <div class="chip ledger"><b>the ledger</b><span>single source of truth</span></div>
+            </div>
+          </div>
+          <div class="arrow" aria-hidden="true"><svg viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9h20m-5-5 5 5-5 5"/></svg></div>
+          <div class="node door" id="n-target"><div class="nlabel">In scope</div><div class="nname">Target</div><div class="nsub">via Chrome · Firefox · Burp</div></div>
+        </div>
+      </div>
+    </div>
+    <p class="cap"><b class="req-c">Request</b> goes out through the one scoped door → <b class="res-c">response</b> comes back and is written to the ledger.</p>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--accent)"></i> request to the target</span>
+      <span><i class="dot" style="background:var(--good)"></i> response into the ledger</span>
+      <span><i class="dot" style="background:var(--guard)"></i> hooks watch every call</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">The walkthrough</p>
+    <h2 style="font-size:clamp(26px,4vw,38px);font-weight:800;margin-bottom:10px">How one test travels</h2>
+    <p class="lead" style="margin-bottom:26px">Follow a single finding from a hunch to something you can actually submit. It plays on its own — or tap any step.</p>
+    <div class="controls">
+      <button class="btn" id="playBtn" aria-label="Play or pause the walkthrough"><span id="playIco">❚❚</span> <span id="playTxt">Pause</span></button>
+      <div class="dots" id="dots" aria-hidden="true"></div>
+    </div>
+    <div class="steps">
+      <div class="steplist" id="steplist" role="list"></div>
+      <div class="stage" id="stage" aria-live="polite"></div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <p class="eyebrow">Safety</p>
+    <h2 style="font-size:clamp(26px,4vw,38px);font-weight:800;margin-bottom:10px">The rails that never come off</h2>
+    <p class="lead" style="margin-bottom:28px">These aren’t reminders Claude tries to remember — the code refuses to go around them.</p>
+    <div class="rails">
+      <div class="rail"><div class="rt">Scope</div><p>Every request is checked against the target’s scope. Off-target or a neighbouring domain? Refused, with a reason.</p></div>
+      <div class="rail"><div class="rt">Rule&nbsp;0</div><p>If a response carries data belonging to anyone outside the test accounts, the sender redacts it to a count and stops. A stranger’s data is never collected.</p></div>
+      <div class="rail"><div class="rt">Evidence bar</div><p>“Not vulnerable” needs 10 real attempts over 5 techniques plus a passing control. A 200 is never allowed to pose as a finding.</p></div>
+      <div class="rail"><div class="rt">Kill switch <code>.bbh/STOP</code></div><p>One file halts all traffic to the target instantly — while local notes and read-only tools keep working, so you can still wrap up.</p></div>
+      <div class="rail"><div class="rt">Stop gate</div><p>The session won’t quietly end while the map still has untested work — and it won’t trap you either.</p></div>
+      <div class="rail"><div class="rt">One rate limiter</div><p>Every tester shares one throttle, so more parallel work never means more load on the target.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Why a plugin, not just instructions</p>
+    <h2 style="font-size:clamp(26px,4vw,38px);font-weight:800;margin-bottom:26px">Soft advice vs. enforced rules</h2>
+    <div class="two">
+      <div class="col soft">
+        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z"/></svg> The method as prose</h3>
+        <ul>
+          <li>Claude goes <b>deep on one bug class</b> and forgets the other thirty.</li>
+          <li>Calls a <b>200 OK</b> a finding without reading the body.</li>
+          <li>Closes a bug class after <b>one test</b>, not after proving it.</li>
+          <li><b>Stops early</b>, long before the attack surface is covered.</li>
+          <li>Writes a report from a <b>hunch</b>, with hedge words.</li>
+        </ul>
+      </div>
+      <div class="col hard">
+        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/></svg> The method as code</h3>
+        <ul>
+          <li>The <b>ledger</b> opens a cell for every input × every bug class — none get skipped.</li>
+          <li>A hit is only a <b>candidate</b> until a <b>second, independent</b> agent verifies it.</li>
+          <li>A “no” needs its <b>10 cases + control</b> on file, or the cell stays open.</li>
+          <li>The <b>stop gate</b> refuses to end while real work is open.</li>
+          <li>The report <b>lint</b> rejects hedge words and bad format before it can be written.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="sum">Claude stays the brain. bbh is the discipline it can’t forget.</p>
+    <div class="where">
+      <div><code>.claude/CLAUDE.md</code><br>the rules &amp; Rule 0, read every session</div>
+      <div><code>skills/</code><br>recon · coverage-matrix · report-writer · triage-gate</div>
+      <div><code>the bbh plugin</code><br>ledger · tools · hooks · scoped sender · case generators</div>
+      <div><code>prompt.md</code><br>the one file you fill in per target</div>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  // colour the inline caption bits from tokens
+  try{
+    var rc=document.querySelector('.req-c'), sc=document.querySelector('.res-c');
+    if(rc) rc.style.color='var(--accent)'; if(sc) sc.style.color='var(--good)';
+  }catch(e){}
+
+  var steps=[
+    {t:"Recon the app",b:"Claude walks every page, recovers source maps, and reads the JavaScript line by line to learn what the app actually does.",
+     term:'<span class="m"># map the target</span>\nrecon → <span class="c">42 endpoints</span>, <span class="c">7 inputs</span> found'},
+    {t:"Open the cells",b:"The planner opens one cell for every input crossed with every relevant bug class. This is the grid that decides when the work is finished.",
+     term:'plan() → opened <span class="c">186 cells</span>\n<span class="m">endpoint × input × vuln-class</span>'},
+    {t:"Pick the next task",b:"Claude never tests what it feels like. It asks the ledger, which hands back the single highest-value cell to work next.",
+     term:'next_task()\n→ <span class="c">sqli</span> on <span class="c">?cat=</span>  /listproducts'},
+    {t:"Fire the test cases",b:"The generator builds ~10+ cases over several techniques. They all leave through the one scoped, rate-limited door — and are captured verbatim.",
+     term:'run_cases() <span class="m">through the sender</span>\n<span class="m">10 cases · 5 techniques · 1 control</span>'},
+    {t:"A hit becomes a candidate",b:"A real differential flips the cell to “candidate”. Not a finding yet — just a signal worth proving. A plain 200 never qualifies.",
+     term:'case 6 → <span class="c">POSITIVE</span>\ncell state: <span class="c">candidate</span> <span class="m">(not confirmed)</span>'},
+    {t:"A second agent verifies",b:"An independent verifier re-runs it from a clean state and tries to refute it. Only its sign-off can turn a candidate into a confirmed finding.",
+     term:'verify ×2  <span class="m">(60s apart, clean state)</span>\n→ <span class="g">upheld</span> → <span class="g">confirmed</span>'},
+    {t:"Write the report",b:"render_report() drafts it in the house format with the real request/response proof and a repro script — and the lint blocks any hedge words.",
+     term:'render_report() → <span class="g">report-1.md</span>\n+ repro/finding-1.sh <span class="m">(exits 0)</span>'},
+    {t:"Through the triage gate",b:"Before anything is filed, a fresh agent attacks the report with a real triager’s objections. Survive, and it’s ready to submit.",
+     term:'triage-gate → <span class="g">ACCEPT</span>\n<span class="m">ready to submit</span>'}
+  ];
+  var list=document.getElementById('steplist'), stage=document.getElementById('stage'), dotwrap=document.getElementById('dots');
+  var cur=0, timer=null, playing=true;
+  var reduce=false; try{reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){}
+
+  steps.forEach(function(s,i){
+    var b=document.createElement('button'); b.className='step'; b.setAttribute('role','listitem');
+    b.innerHTML='<span class="num">'+(i+1)+'</span><span><span class="stitle">'+s.t+'</span><span class="sbody">'+s.b+'</span></span>';
+    b.addEventListener('click',function(){ go(i); pause(); });
+    list.appendChild(b);
+    var d=document.createElement('i'); d.addEventListener('click',function(){ go(i); pause(); }); dotwrap.appendChild(d);
+  });
+  var stepEls=list.querySelectorAll('.step'), dotEls=dotwrap.querySelectorAll('i');
+
+  function render(){
+    var s=steps[cur];
+    stage.innerHTML='<div class="snum">STEP '+(cur+1)+' / '+steps.length+'</div><h3>'+s.t+'</h3><p>'+s.b+'</p><div class="term">'+s.term+'</div>';
+    stepEls.forEach(function(el,i){ el.classList.toggle('is-active',i===cur); el.classList.toggle('done',i<cur); });
+    dotEls.forEach(function(el,i){ el.classList.toggle('on',i===cur); });
+  }
+  function go(i){ cur=((i%steps.length)+steps.length)%steps.length; render(); }
+  function next(){ go(cur+1); }
+  var playBtn=document.getElementById('playBtn'), playIco=document.getElementById('playIco'), playTxt=document.getElementById('playTxt');
+  function play(){ if(reduce) return; playing=true; playIco.textContent='❚❚'; playTxt.textContent='Pause';
+    clearInterval(timer); timer=setInterval(next,2800); }
+  function pause(){ playing=false; playIco.textContent='▶'; playTxt.textContent='Play'; clearInterval(timer); }
+  playBtn.addEventListener('click',function(){ playing?pause():play(); });
+
+  render();
+  if(reduce){ pause(); } else { play(); }
+  // pause when off-screen to save work
+  try{
+    var io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(!e.isIntersecting && playing) { clearInterval(timer); } else if(e.isIntersecting && playing){ play(); } }); });
+    io.observe(document.getElementById('stage'));
+  }catch(e){}
+})();
+</script>
