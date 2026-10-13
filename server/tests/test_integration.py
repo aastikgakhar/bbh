@@ -119,6 +119,23 @@ def test_options_preflight_records_request_but_creates_no_endpoint(ledger, eng):
     assert ledger.request(rid2).get("endpoint_id")
 
 
+def test_500_escalation_opens_deeper_injection_cells(ledger, eng):
+    from bbh.runner import _maybe_escalate_server_error
+
+    eid, _ = ledger.upsert_endpoint(origin="http://127.0.0.1:5057", method="GET", path_template="/api/thing")
+    iid, _ = ledger.upsert_input(endpoint_id=eid, name="q", location="query", sample_value="1")
+    trig, _ = ledger.open_cell(endpoint_id=eid, input_id=iid, vuln_class="xss_reflected")
+    opened = _maybe_escalate_server_error(ledger, ledger.cell(trig), 500)
+    assert set(opened) == {"sqli", "command_injection", "path_traversal", "ssrf"}
+    classes = {r["vuln_class"] for r in ledger.q("SELECT vuln_class FROM cells WHERE endpoint_id=? AND input_id=?", (eid, iid))}
+    assert {"sqli", "command_injection", "path_traversal", "ssrf"} <= classes
+    # once per input: a second 5xx on the same input does not re-open
+    assert _maybe_escalate_server_error(ledger, ledger.cell(trig), 500) == []
+    # no chains: a cell opened by escalation never escalates again
+    sqli = ledger.q1("SELECT id FROM cells WHERE endpoint_id=? AND input_id=? AND vuln_class='sqli'", (eid, iid))
+    assert _maybe_escalate_server_error(ledger, ledger.cell(sqli["id"]), 500) == []
+
+
 def test_burp_ingest_skips_the_senders_own_test_traffic(ledger, eng):
     from bbh.ingest import request_signature
 

@@ -35,6 +35,10 @@ DATASTORE_NAMES = {"id", "q", "query", "search", "filter", "term", "keyword", "k
 LIMIT_NAMES = {"coupon", "code", "promo", "voucher", "redeem", "invite", "token", "otp", "vote", "like", "credit", "credits",
                "quota", "limit", "claim", "transfer", "amount", "seat", "seats", "gift", "referral"}
 FILE_NAMES = {"file", "filename", "path", "dir", "folder", "template", "page", "include", "doc", "document", "download", "attachment", "name", "image", "img"}
+# Inputs whose name suggests the value reaches an OS command (a ping/dig/convert/backup backend).
+# Tight on purpose: command_injection is otherwise opened only by the 500-escalation, to keep cost down.
+COMMAND_NAMES = {"cmd", "command", "exec", "execute", "run", "ping", "host", "hostname", "domain",
+                 "dns", "nslookup", "lookup", "shell", "process", "jobname", "script", "target", "action"}
 BROWSER_HEADERS = {
     "host", "user-agent", "accept", "accept-language", "accept-encoding", "connection", "content-length", "content-type",
     "cookie", "authorization", "origin", "referer", "upgrade-insecure-requests", "cache-control", "pragma", "te",
@@ -301,4 +305,6 @@ def input_roles(spec: InputSpec) -> set[str]:
         roles.add("file_like")
     if name in LIMIT_NAMES:
         roles.add("limit_like")
+    if name in COMMAND_NAMES:
+        roles.add("command_like")
     return roles

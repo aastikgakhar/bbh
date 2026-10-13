@@ -127,6 +127,8 @@ def plan(ledger, endpoint_id: int) -> PlanReport:
                 _open(ledger, report, endpoint_id=endpoint_id, input_id=iid, cls="idor_write", context=ctx)
         if "file_like" in roles:
             _open(ledger, report, endpoint_id=endpoint_id, input_id=iid, cls="path_traversal", context=ctx)
+        if "command_like" in roles:
+            _open(ledger, report, endpoint_id=endpoint_id, input_id=iid, cls="command_injection", context=ctx)
         if spec.location == "filename":
             _open(ledger, report, endpoint_id=endpoint_id, input_id=iid, cls="upload", context=ctx)
 

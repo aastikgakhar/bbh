@@ -235,8 +235,51 @@ def run_case(ledger, cell_id: int, case_no: int, *, principal: str | None = None
                              principal=case_principal, route=route,
                              status=exchange_for_block.status if exchange_for_block else None,
                              elapsed_ms=exchange_for_block.elapsed_ms if exchange_for_block else None)
+    # 500-escalation: a genuine server error (not a gateway/WAF block) on a payload is a strong
+    # signal the input reaches the backend, so open the deeper injection classes on this input.
+    if (not planned.get("is_control") and exchange_for_block is not None
+            and exchange_for_block.status in (500, 501)):
+        escalated = _maybe_escalate_server_error(ledger, cell, exchange_for_block.status)
+        if escalated:
+            return {"case_no": case_no, "technique": technique, "outcome": outcome, "observation": observation,
+                    "cell_state": rec["cell_state"], "route": route, "escalated": escalated}
     return {"case_no": case_no, "technique": technique, "outcome": outcome, "observation": observation,
             "cell_state": rec["cell_state"], "route": route}
+
+
+# Deeper injection classes to open when a payload triggers a server error. All input-level, so the
+# trigger must carry an input. Order roughly by how directly a 5xx implicates each.
+_ESCALATION_CLASSES = ("sqli", "command_injection", "path_traversal", "ssrf")
+
+
+def _maybe_escalate_server_error(ledger, cell: dict, status: int) -> list[str]:
+    """Open the deeper injection classes on the input that just produced a 5xx. Once per input, and
+    never from a cell that was itself opened by escalation (no runaway chains)."""
+    input_id = cell.get("input_id")
+    if input_id is None:
+        return []
+    if (cell.get("context") or {}).get("escalated_from"):
+        return []
+    key = f"escalated_5xx:{cell['endpoint_id']}:{input_id}"
+    if ledger.kv_get(key):
+        return []
+    ledger.kv_set(key, True)
+    opened: list[str] = []
+    for cls in _ESCALATION_CLASSES:
+        if cls == cell["vuln_class"]:
+            continue
+        try:
+            _, created = ledger.open_cell(endpoint_id=cell["endpoint_id"], input_id=input_id, vuln_class=cls,
+                                          context={"escalated_from": "5xx", "trigger_cell": cell["id"], "trigger_status": status},
+                                          source="depth", priority=85)
+            if created:
+                opened.append(cls)
+        except Exception:  # noqa: BLE001
+            continue
+    if opened:
+        ledger.event("escalate.server_error", entity="cell", entity_id=cell["id"],
+                     detail={"status": status, "opened": opened, "input_id": input_id})
+    return opened
 
 
 def _run_browser_case(ledger, cell_id, case_no, planned, ctx, base, ref, sub, principal, sender, cap_dir, stem,
