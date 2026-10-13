@@ -49,13 +49,21 @@ The agent works on what `next_task()` returns: candidates first, then unverified
 
 bbh ships read-only views (the generated markdown) rather than a live web dashboard. The decision and reasoning are in `docs/design.md` (Optional section): the two browser MCPs and Burp already cover capture, and a static grid the researcher can open in any editor is lower-risk than another listening socket next to the ones the inventory already flagged.
 
-## The kill switch
+## The three ways to stop — they are different, and the difference matters
 
-Create the file `./.bbh/STOP` (any content) to stop immediately: every send is refused, every network-capable tool is denied by the PreToolUse hook, and the Stop gate allows the session to end. Delete the file to resume. Use it whenever something looks wrong.
+There are three controls. Confusing them has trapped a session, so here is exactly what each one does.
+
+1. **`.bbh/STOP` — the kill switch (emergency brake on network traffic).** Create the file (any content) and the PreToolUse hook refuses every tool that can reach the target: the browsers, Burp, WebFetch, the bbh send/run/verify tools, and any Bash/PowerShell command that makes a network call (curl/wget/ngrok/ssh/…). It deliberately **leaves local disk, documentation and read-only tools working** — Read, Write, Edit, Grep, a plain `rm`, git, the bbh ledger reads and `render_report` — so a halted session can still explain itself, archive, and **remove the file itself** (`rm .bbh/STOP`) to resume. The Stop gate also releases while STOP is present. Use it the moment anything looks wrong on the wire.
+
+2. **`.bbh/PAUSE` — the soft stop (end cleanly, block nothing).** Create the file and the Stop gate allows the session to end, but **no tool is blocked**. This is the agent's own clean exit when the board is done or only `blocked`/`n_a` work with reasons remains — it does not need the kill switch's lockout just to stop. Remove the file to re-engage the gate. The agent may create and delete this itself.
+
+3. **The Stop *gate* (a `Stop` hook) — refuses to end while actionable work is open.** It blocks the session from ending while the ledger has open cells, unverified candidates/findings, or untriaged reports, and lists the next tasks. Its escape hatch: it allows the stop after it has blocked `GUARD_LIMIT` (3) times in a row **without the open-work total dropping**. "Progress" is a *drop in the total*, not any event firing — so a background worker closing one cell while two more open does not reset the guard forever. The gate also allows the stop when STOP or PAUSE is set, and when the ledger/MCP server is unreachable (it cannot guard what it cannot read).
+
+Rule of thumb: **PAUSE to stop, STOP to halt the wire.** PAUSE ends the session; STOP cuts network access but keeps you able to document and clean up.
 
 ## Reading stuck.md
 
-If the Stop gate blocks three times in a row with no new progress between attempts, it stops fighting you: it allows the stop and writes `./.bbh/stuck.md` with the open-work counts and the next tasks the agent did not do. That means the loop stalled, not that the work is finished. Read it, see where it stalled (usually a cell that needs a second account, an OOB listener, or a browser step), unblock that, and start again. A genuinely finished session has an empty matrix of open cells and needs no `stuck.md`.
+If the Stop gate blocks `GUARD_LIMIT` times in a row with no drop in the open-work total, it stops fighting you: it allows the stop and writes `./.bbh/stuck.md` with the open-work counts and the next tasks the agent did not do. That means the loop stalled, not that the work is finished. Read it, see where it stalled (usually a cell that needs a second account, an OOB listener, or a browser step), unblock that, and start again. A genuinely finished session has no actionable open work and needs no `stuck.md`.
 
 ## What the hooks enforce (and what they leave to you)
 

@@ -51,13 +51,29 @@ def body(data, root):
     ti = data.get("tool_input") or {}
     in_subagent = bool(data.get("agent_id") or data.get("agent_type"))
 
-    # kill switch: refuse every network-capable tool and every bbh send tool
+    # kill switch (.bbh/STOP): an emergency brake on TEST TRAFFIC, not a full lockout. It refuses
+    # every tool that can reach the target so nothing more is sent, but it deliberately LEAVES
+    # local disk, documentation and read-only tools working, so a halted session can explain
+    # itself, archive, and remove the file to resume. A Bash/PowerShell command is refused only
+    # when it actually makes a network call; a plain `rm .bbh/STOP`, a git/python command or a
+    # file write is allowed. For a clean end that blocks nothing, use the .bbh/PAUSE soft stop.
     if (root / ".bbh" / "STOP").exists():
-        if (tool.startswith(BROWSER_PREFIXES) or tool.startswith("mcp__burp__")
-                or tool in ("WebFetch",) or tool in ("Bash", "PowerShell")
-                or any(s in tool for s in ("send_case", "run_cases", "fetch", "probe_reflection", "verify_finding"))):
-            h.deny(".bbh/STOP is present (kill switch): this send is refused. Remove the file to resume.")
+        cmd = ti.get("command", "") if tool in ("Bash", "PowerShell") else ""
+        net_tool = (tool.startswith(BROWSER_PREFIXES) or tool.startswith("mcp__burp__")
+                    or tool == "WebFetch"
+                    or any(s in tool for s in ("send_case", "run_cases", "probe_reflection",
+                                               "verify_finding", "recon_crawl", "__fetch")))
+        net_shell = bool(cmd) and bool(
+            re.search(r"\b(curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm|nc|ncat|telnet|ngrok|ssh|scp)\b", cmd, re.I)
+            or _urls_in(cmd))
+        if net_tool or net_shell:
+            h.deny(".bbh/STOP (kill switch) is set: this makes a network request to the target, so it is "
+                   "refused. Local disk, documentation and read-only tools still work — use them to wrap up, "
+                   "then `rm .bbh/STOP` (or delete the file) to resume. To end the session cleanly without "
+                   "blocking any tool, create .bbh/PAUSE instead.")
             return
+        # a local, non-network tool under STOP falls through to the normal checks below (so Write/
+        # Edit still lint reports, and a local Bash command still runs).
 
     # verifier sign-off: only the verifier subagent may cast it (a candidate never dies on the
     # tester's own say-so). The main session acting solo is allowed.

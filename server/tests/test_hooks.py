@@ -183,16 +183,62 @@ def test_stop_gate_no_progress_guard_allows_after_three(eng):
     assert (eng / ".bbh" / "stuck.md").is_file()
 
 
-def test_stop_gate_resets_on_progress(eng):
-    _open_cell(eng)
-    run_hook("stop_gate.py", {"cwd": str(eng), "stop_hook_active": True}, eng)   # block 1
-    run_hook("stop_gate.py", {"cwd": str(eng), "stop_hook_active": True}, eng)   # block 2
-    # make progress: close a cell negative is heavy; just append a progress event via a new cell
+def test_stop_gate_resets_when_total_drops(eng):
+    # progress is a DROP in the open-work total, not any event firing. With blocks already at the
+    # limit but the total lower than the last attempt, the guard resets and blocks again (it does
+    # not allow), and the counter is back to 1.
+    _open_cell(eng)  # one open cell -> total 1
     led = _mk_ledger(eng)
-    eid = led.q1("SELECT id FROM endpoints LIMIT 1")["id"]
-    iid2, _ = led.upsert_input(endpoint_id=eid, name="r", location="query", sample_value="1")
-    led.open_cell(endpoint_id=eid, input_id=iid2, vuln_class="xss_reflected")  # a new progress event
+    led.kv_set("stop_guard", {"blocks": 3, "last_total": 2})  # last attempt saw 2; now it is 1
     led.close()
     out, _, _ = run_hook("stop_gate.py", {"cwd": str(eng), "stop_hook_active": True}, eng)
-    # progress since the last block resets the guard, so it blocks again rather than allowing
     assert out.get("decision") == "block"
+    led = _mk_ledger(eng)
+    assert (led.kv_get("stop_guard") or {}).get("blocks") == 1  # the drop reset the counter
+    led.close()
+
+
+def test_stop_gate_does_not_reset_on_a_rising_total(eng):
+    # a background fleet opening cells (total goes UP) is not progress: the guard keeps counting,
+    # so the gate can still reach its escape instead of blocking forever.
+    _open_cell(eng)
+    led = _mk_ledger(eng)
+    led.kv_set("stop_guard", {"blocks": 3, "last_total": 1})  # now a second cell makes total 2 (rose)
+    eid = led.q1("SELECT id FROM endpoints LIMIT 1")["id"]
+    iid2, _ = led.upsert_input(endpoint_id=eid, name="r", location="query", sample_value="1")
+    led.open_cell(endpoint_id=eid, input_id=iid2, vuln_class="xss_reflected")
+    led.close()
+    out, _, _ = run_hook("stop_gate.py", {"cwd": str(eng), "stop_hook_active": True}, eng)
+    assert out == {}  # blocks 3 -> 4 > limit, total did not drop -> allowed (no infinite block)
+    assert (eng / ".bbh" / "stuck.md").is_file()
+
+
+def test_stop_gate_allows_on_pause_soft_stop(eng):
+    _open_cell(eng)
+    (eng / ".bbh" / "PAUSE").write_text("board done; only blocked work remains")
+    out, _, _ = run_hook("stop_gate.py", {"cwd": str(eng), "stop_hook_active": True}, eng)
+    assert out == {}  # soft stop releases the gate with open work present
+
+
+def test_stop_gate_allows_when_ledger_unreadable(eng):
+    # the MCP server / ledger is unreachable: the gate cannot guard what it cannot read, so it
+    # must allow the stop rather than trap the session.
+    (eng / ".bbh" / "ledger.db").write_bytes(b"not a database" * 200)
+    out, _, _ = run_hook("stop_gate.py", {"cwd": str(eng), "stop_hook_active": True}, eng)
+    assert out == {}
+
+
+def test_kill_switch_allows_local_disk_work_and_self_clear(eng):
+    (eng / ".bbh" / "STOP").write_text("x")
+    # a local file write (documentation) is allowed under STOP
+    w, _, _ = run_hook("pre_tool_scope.py", {"cwd": str(eng), "tool_name": "Write",
+                                             "tool_input": {"file_path": str(eng / "workings.md"), "content": "halted: why\n"}}, eng)
+    assert w == {} or w.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    # the agent can remove the kill switch itself
+    rm, _, _ = run_hook("pre_tool_scope.py", {"cwd": str(eng), "tool_name": "Bash",
+                                             "tool_input": {"command": "rm .bbh/STOP"}}, eng)
+    assert rm.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    # but a shell command that reaches the network is still refused
+    net, _, _ = run_hook("pre_tool_scope.py", {"cwd": str(eng), "tool_name": "Bash",
+                                              "tool_input": {"command": "curl http://127.0.0.1:5057/x"}}, eng)
+    assert net.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
