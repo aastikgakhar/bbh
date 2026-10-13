@@ -370,6 +370,14 @@ def _decide(ledger, planned, eval_ctx, exchange_for_block, cap_dir, stem) -> tup
     if result is True:
         return ("control_pass" if planned["is_control"] else "positive"), f"{detail} ({loc})"
     if result is None:
+        if detail.startswith("UNKNOWN_CONDITION"):
+            # Stale-code signal: record it loudly so status() can surface it, then fall through to
+            # inconclusive (never a negative, so stale code can never fabricate a closed cell).
+            try:
+                ledger.event("stale.unknown_condition", detail={"detail": detail[:200], "technique": planned.get("technique")})
+                ledger.kv_set("stale_code_suspected", {"detail": detail[:200], "technique": planned.get("technique")})
+            except Exception:  # noqa: BLE001
+                pass
         return "inconclusive", f"the condition cannot be evaluated automatically: {detail} ({loc})"
     return ("control_fail" if planned["is_control"] else "negative"), f"{detail} ({loc})"
 

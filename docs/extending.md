@@ -33,7 +33,7 @@ Burp / HAR / browser ──(ingest.py)──► requests ──(normalise.py)─
                       render.py ── report-N.md + repro/finding-N.{sh,json} + state.csv / feature-matrix.md / findings-summary.md
 
 Cross-cutting:
-  server.py   — 29 MCP tools, thin wrappers over ledger.py / the modules above. Never writes SQL itself.
+  server.py   — 30 MCP tools, thin wrappers over ledger.py / the modules above. Never writes SQL itself.
   tasks.py    — next_task() priority order, open-work counting, depth-queue refill.
   classes.py  — the vuln-class registry: ladders, evidence minimums, n_a reasons, recipes, red-team prompts.
   hooks/      — stdlib-only scripts: inject tasks, guard scope, lint reports, gate Stop. Fail open except scope + kill switch.

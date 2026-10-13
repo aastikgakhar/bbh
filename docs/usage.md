@@ -17,7 +17,7 @@ Then restart Claude Code (or `/plugin` to confirm it loaded). To develop or run 
 claude --plugin-dir C:/Tools/burp-mcp/bbh
 ```
 
-Either way loads the bbh MCP server (28 tools), the hooks, and the three agents (`bbh:class-tester`, `bbh:verifier`, `bbh:triager`). The plugin skills are namespaced `bbh:recon`, `bbh:coverage-matrix`, `bbh:report-writer`, `bbh:triage-gate`; the project copies under `.claude/skills/` keep their bare names, so both coexist.
+Either way loads the bbh MCP server (30 tools), the hooks, and the three agents (`bbh:class-tester`, `bbh:verifier`, `bbh:triager`). The plugin skills are namespaced `bbh:recon`, `bbh:coverage-matrix`, `bbh:report-writer`, `bbh:triage-gate`; the project copies under `.claude/skills/` keep their bare names, so both coexist.
 
 ### Requirements
 
@@ -64,6 +64,10 @@ Rule of thumb: **PAUSE to stop, STOP to halt the wire.** PAUSE ends the session;
 ## Reading stuck.md
 
 If the Stop gate blocks `GUARD_LIMIT` times in a row with no drop in the open-work total, it stops fighting you: it allows the stop and writes `./.bbh/stuck.md` with the open-work counts and the next tasks the agent did not do. That means the loop stalled, not that the work is finished. Read it, see where it stalled (usually a cell that needs a second account, an OOB listener, or a browser step), unblock that, and start again. A genuinely finished session has no actionable open work and needs no `stuck.md`.
+
+## If results look stale (the server runs the code it imported)
+
+`python -m bbh.server` loads its modules once. If you edit a generator or the evaluator on disk — or a detached worker stores a plan using a newer condition type — the long-running server keeps executing the OLD code, and plans quietly stall (`inconclusive`, never a false negative). `status()` now carries a `code` block: when `code.stale` is true, the source on disk no longer matches what the server loaded, and a `warnings` entry says so. Call `reload()` to hot-reload the generators/evaluator in place; it reports whether the fingerprint now matches disk. If it still reports stale or lists errors, restart `python -m bbh.server` for a guaranteed clean reset.
 
 ## What the hooks enforce (and what they leave to you)
 

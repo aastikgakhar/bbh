@@ -8,13 +8,14 @@ BBH_ENGAGEMENT_DIR / CLAUDE_PROJECT_DIR / cwd.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from . import config, render, tasks
+from . import codehash, config, render, tasks
 from .cases import generate as generate_cases
 from .cases.base import Ctx
 from .ingest import ingest_har, sync_burp
@@ -22,6 +23,11 @@ from .ledger import Ledger, LedgerError
 from .paths import Paths
 from .planner import plan as plan_endpoint
 from .planner import probe_reflection as probe_reflection_impl
+
+# The source fingerprint at import time. status() compares it to a fresh read of disk so a stale
+# long-running server (disk edited, or a fresh worker storing plans this process cannot evaluate)
+# is visible instead of silently stalling; reload() refreshes both the modules and this value.
+_LOADED_FP = codehash.fingerprint()
 
 mcp = FastMCP("bbh", instructions=(
     "bbh is the discipline ledger for this authorized bug bounty engagement. Call status() and next_task() first. "
@@ -64,6 +70,17 @@ def status() -> dict:
         counts = led.counts()
         work = tasks.open_work(led)
         nxt = tasks.next_task(led, peek=True)
+        disk_fp = codehash.fingerprint()
+        stale = disk_fp != _LOADED_FP
+        warnings = []
+        if stale:
+            warnings.append("SERVER CODE IS STALE: the bbh source on disk has changed since this server started. "
+                            "It is still running the OLD code. Call reload(), or restart `python -m bbh.server`, "
+                            "before trusting any result.")
+        su = led.kv_get("stale_code_suspected", None)
+        if su:
+            warnings.append(f"A plan used a condition this server could not evaluate ({su.get('detail','')[:120]}). "
+                            "This is the stale-code symptom; reload() or restart, then re-run those cases.")
         out = {
             "engagement": {"target": eng.get("target"), "configured": eng.get("configured"),
                            "scope": eng.get("scope"), "programme": eng.get("programme"),
@@ -72,11 +89,67 @@ def status() -> dict:
             "depth": counts["depth"], "endpoints": counts["endpoints"], "inputs": counts["inputs"],
             "requests_seen": counts["requests"], "cases_run": counts["cases"],
             "open_work": work, "kill_switch": led.paths.stop_requested(),
+            "code": {"loaded": _LOADED_FP, "disk": disk_fp, "stale": stale},
             "next_task": nxt.to_dict() if nxt else None,
         }
+        if warnings:
+            out["warnings"] = warnings
         return out
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
+
+
+_RELOAD_ORDER = [
+    "bbh.hedge", "bbh.httpraw", "bbh.normalise", "bbh.scope", "bbh.blocks", "bbh.guard",
+    "bbh.evaluate", "bbh.mutate", "bbh.classes", "bbh.assertions",
+    "bbh.cases.base", "bbh.cases.authz", "bbh.cases.injection", "bbh.cases.markup", "bbh.cases.files",
+    "bbh.cases.misc", "bbh.cases.race", "bbh.cases.redirect", "bbh.cases.ssrf", "bbh.cases.graphql",
+    "bbh.cases.csrf", "bbh.cases",
+    "bbh.planner", "bbh.runner", "bbh.verify", "bbh.ingest", "bbh.render", "bbh.crawl", "bbh.tasks",
+]
+
+
+@mcp.tool()
+def reload() -> dict:
+    """Reload the generator/evaluator code from disk WITHOUT restarting the server, so a hand edit or
+    a fresh worker's plan no longer runs against stale code. Reports the new fingerprint; if it is
+    still stale or any module failed, restart `python -m bbh.server` for a guaranteed clean reset."""
+    global _LEDGER, _LOADED_FP, generate_cases, plan_endpoint, probe_reflection_impl, tasks, render, config
+    import sys
+
+    reloaded, errors = [], []
+    for name in _RELOAD_ORDER:
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        try:
+            importlib.reload(mod)
+            reloaded.append(name)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
+    try:
+        cases_mod = importlib.import_module("bbh.cases")
+        planner_mod = importlib.import_module("bbh.planner")
+        generate_cases = cases_mod.generate
+        plan_endpoint = planner_mod.plan
+        probe_reflection_impl = planner_mod.probe_reflection
+        tasks = importlib.import_module("bbh.tasks")
+        render = importlib.import_module("bbh.render")
+        config = importlib.import_module("bbh.config")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"rebind: {type(exc).__name__}: {exc}")
+    _LEDGER = None  # rebuilt by the next L() with the reloaded classes
+    _LOADED_FP = codehash.fingerprint()
+    try:
+        L().kv_set("stale_code_suspected", None)
+    except Exception:  # noqa: BLE001
+        pass
+    disk_fp = codehash.fingerprint()
+    stale = disk_fp != _LOADED_FP
+    note = ("reloaded; code now matches disk" if not stale and not errors else
+            "reload did not fully take — restart `python -m bbh.server` for a clean reset")
+    return {"ok": not errors and not stale, "reloaded": reloaded, "errors": errors,
+            "code": {"loaded": _LOADED_FP, "disk": disk_fp, "stale": stale}, "note": note}
 
 
 @mcp.tool()

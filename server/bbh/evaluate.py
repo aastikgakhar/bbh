@@ -245,7 +245,11 @@ def evaluate(cond: dict, ctx: EvalContext) -> tuple[bool | None, str]:
         return n > 0, f"{n} OOB interaction(s)"
     if t == "third_party_seen":
         return ctx.third_party, ("records outside the test accounts were returned" if ctx.third_party else "no records outside the test accounts")
-    return None, f"unknown condition {t!r}"
+    # An unknown condition type almost always means the running server is executing STALE code: a
+    # plan was stored by fresh code (a detached worker or a hand edit) that uses a condition this
+    # evaluator does not know. Make it unmistakable (the runner turns this sentinel into a loud
+    # staleness warning) rather than letting it hide as a quiet inconclusive. Never a negative.
+    return None, f"UNKNOWN_CONDITION {t!r}: the evaluator does not know this condition type; the server is likely running stale code (call reload() or restart it)"
 
 
 def summarise(ex: Exchange) -> str:
