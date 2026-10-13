@@ -276,6 +276,14 @@ class Sender:
             meta["body_decoded_from"] = resp.headers.get("content-encoding")
         return Exchange(request=sent, response=response, elapsed_ms=elapsed, meta=meta)
 
+    def _note_sent(self, req: Request) -> None:
+        """Record this request's signature so the Burp auto-ingest skips the harness's own traffic."""
+        try:
+            from .ingest import request_signature
+            self.ledger.note_sent_signature(request_signature(req))
+        except Exception:  # noqa: BLE001
+            pass
+
     def send(self, req: Request, *, principal: str | None, capture: str | Path | None = None, cell_id: int | None = None,
              case_no: int | None = None, technique: str | None = None, route: str = "sender", meta: dict | None = None,
              endpoint_id: int | None = None, vuln_class: str | None = None, base_principal: str | None = None,
@@ -283,6 +291,7 @@ class Sender:
         self.check_kill()
         self.ledger.require_configured()
         _, host, _, _ = self.check_scope(req.url)
+        self._note_sent(req)
         self.check_lock(req, endpoint_id=endpoint_id, vuln_class=vuln_class)
         out = self._prepare(req, principal, base_principal)
         http2 = req.http_version.upper().startswith("HTTP/2")
@@ -373,6 +382,7 @@ class Sender:
         self.check_kill()
         self.ledger.require_configured()
         _, host, _, _ = self.check_scope(req.url)
+        self._note_sent(req)
         self.check_lock(req, endpoint_id=endpoint_id, vuln_class="race")
         out = self._prepare(req, principal, base_principal)
         http2 = req.http_version.upper().startswith("HTTP/2")

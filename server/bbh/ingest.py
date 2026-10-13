@@ -34,6 +34,25 @@ RESP_MARK = '","response":"'
 NOTES_MARK = '","notes":"'
 
 
+def request_signature(req: Request) -> str:
+    """A stable signature of a request: method + scheme://host/path + sorted query + body hash.
+
+    Burp logs everything the sender sends, so the auto-ingest would otherwise re-ingest the
+    harness's own test traffic as new application endpoints. The sender records this signature for
+    every send (ledger.note_sent_signature); record_exchange skips Burp records that match. The
+    signature excludes headers and port formatting so the sender's send and Burp's echo of it agree.
+    """
+    from urllib.parse import parse_qsl, urlsplit
+
+    u = urlsplit(req.url)
+    q = "&".join(f"{k}={v}" for k, v in sorted(parse_qsl(u.query, keep_blank_values=True)))
+    body = req.body or b""
+    if isinstance(body, str):
+        body = body.encode("utf-8", "surrogateescape")
+    bh = hashlib.sha1(body).hexdigest()[:12]
+    return f"{req.method.upper()} {(u.scheme or '').lower()}://{(u.hostname or '').lower()}{u.path}?{q}#{bh}"
+
+
 class IngestError(RuntimeError):
     pass
 
@@ -44,6 +63,7 @@ class IngestReport:
     records_seen: int = 0
     in_scope: int = 0
     foreign_skipped: int = 0
+    own_skipped: int = 0
     duplicates: int = 0
     truncated: int = 0
     new_endpoints: list[int] = field(default_factory=list)
@@ -53,7 +73,8 @@ class IngestReport:
 
     def summary(self) -> dict:
         return {"source": self.source, "records_seen": self.records_seen, "in_scope": self.in_scope,
-                "foreign_skipped": self.foreign_skipped, "duplicates": self.duplicates, "truncated": self.truncated,
+                "foreign_skipped": self.foreign_skipped, "own_skipped": self.own_skipped,
+                "duplicates": self.duplicates, "truncated": self.truncated,
                 "new_endpoints": len(self.new_endpoints), "new_inputs": len(self.new_inputs), "errors": self.errors[:5]}
 
 
@@ -264,6 +285,16 @@ def record_exchange(ledger, ex: Exchange, *, source: str, principal_id: int | No
     except ScopeError:
         report.foreign_skipped += 1
         return None
+    # Skip the harness's own test traffic: Burp logs every request the sender makes, and re-ingesting
+    # those as application endpoints is what stopped the matrix converging in the field. The sender
+    # records a signature for each send; a Burp record that matches one is ours, not new app surface.
+    if source == "burp":
+        try:
+            if ledger.is_own_sent(request_signature(ex.request)):
+                report.own_skipped += 1
+                return None
+        except Exception:  # noqa: BLE001
+            pass
     report.in_scope += 1
     raw = ex.request.to_bytes() + b"\n" + (ex.response.to_bytes() if ex.response else b"")
     digest = hashlib.sha256(raw).hexdigest()

@@ -119,6 +119,28 @@ def test_options_preflight_records_request_but_creates_no_endpoint(ledger, eng):
     assert ledger.request(rid2).get("endpoint_id")
 
 
+def test_burp_ingest_skips_the_senders_own_test_traffic(ledger, eng):
+    from bbh.ingest import request_signature
+
+    (eng.captures / "session-A.txt").write_text("Cookie: lab_session=AAA\n")
+    pid = ledger.principal("A")["id"]
+    # the sender records a signature for a payload request it sent
+    payload = Request(method="GET", url="http://127.0.0.1:5057/api/thing?id=1'%20OR%201=1--%20-",
+                      headers=[("Host", "127.0.0.1:5057")], body=b"")
+    ledger.note_sent_signature(request_signature(payload))
+    before = len(ledger.q("SELECT id FROM endpoints"))
+    # Burp echoes that same request back; it must be recognised as ours and skipped entirely
+    rid = record_exchange(ledger, Exchange(request=payload, response=Response(200, "OK", [("Content-Type", "application/json")], b"{}")),
+                          source="burp", principal_id=pid)
+    assert rid is None
+    assert len(ledger.q("SELECT id FROM endpoints")) == before
+    # a genuine (unmarked) request to the same path still creates the endpoint
+    real = Request(method="GET", url="http://127.0.0.1:5057/api/thing?id=1", headers=[("Host", "127.0.0.1:5057")], body=b"")
+    rid2 = record_exchange(ledger, Exchange(request=real, response=Response(200, "OK", [("Content-Type", "application/json")], b"{}")),
+                           source="burp", principal_id=pid)
+    assert rid2 and len(ledger.q("SELECT id FROM endpoints")) == before + 1
+
+
 def test_plan_opens_independent_sibling_cells(ledger, eng):
     (eng.captures / "session-A.txt").write_text("Cookie: lab_session=AAA\n")
     rid = seed_endpoint(ledger, "GET", "/search?q=hi")

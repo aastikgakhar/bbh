@@ -150,6 +150,9 @@ CREATE TABLE IF NOT EXISTS rate_state (
   host TEXT PRIMARY KEY, next_allowed REAL NOT NULL DEFAULT 0, penalty REAL NOT NULL DEFAULT 1,
   ok_streak INTEGER NOT NULL DEFAULT 0
 );
+-- Signatures of requests the sender itself sent, so the auto-ingest never re-ingests the harness's
+-- own test traffic (Burp logs everything bbh sends) as new application endpoints. Pruned by TTL.
+CREATE TABLE IF NOT EXISTS sent_sigs (sig TEXT PRIMARY KEY, ts REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, kind TEXT NOT NULL, entity TEXT,
   entity_id INTEGER, from_state TEXT, to_state TEXT, detail TEXT, progress INTEGER NOT NULL DEFAULT 1
@@ -304,6 +307,19 @@ class Ledger:
 
     def kv_set(self, key: str, value: Any) -> None:
         self.conn.execute("INSERT INTO kv(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, _j(value)))
+
+    def note_sent_signature(self, sig: str) -> None:
+        """Record that the sender sent a request with this signature, so the Burp auto-ingest can
+        recognise and skip the harness's own test traffic. Opportunistically prunes stale rows."""
+        now = time.time()
+        with self.tx() as c:
+            c.execute("INSERT INTO sent_sigs(sig, ts) VALUES (?, ?) ON CONFLICT(sig) DO UPDATE SET ts = excluded.ts", (sig, now))
+            c.execute("DELETE FROM sent_sigs WHERE ts < ?", (now - 7200,))
+
+    def is_own_sent(self, sig: str, ttl: float = 7200.0) -> bool:
+        """True if the sender sent a request with this signature within the TTL (default 2h)."""
+        row = self.q1("SELECT 1 AS hit FROM sent_sigs WHERE sig = ? AND ts > ?", (sig, time.time() - ttl))
+        return bool(row)
 
     # -- engagement ------------------------------------------------------------------------
 
