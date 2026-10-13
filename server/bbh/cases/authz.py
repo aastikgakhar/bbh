@@ -80,6 +80,35 @@ def gen_idor_read(ctx: Ctx) -> list[TestCase]:
                               negative=f"the {variant} id form is not honoured", rung="cross_principal_read",
                               description=f"IDOR read id format: {variant}"))
         n += 1
+
+    # Single-account IDOR: sequential / neighbour enumeration computed from the input's own sample
+    # value. This runs as the acting principal and needs no second account, so an engagement with
+    # one account still tests IDOR instead of only recording "blocked: no_second_account". The
+    # positive is the Rule 0 third-party signal: a candidate is raised only when the response
+    # carries a record belonging to someone outside the test accounts. The sender's guard stops at
+    # the first such record and keeps only the count plus one proving field, so this never pages a
+    # stranger's data. A control also reads the acting account's OWN object so the cell can close.
+    own = (ctx.sample_value or "").strip()
+    if own:
+        cases.append(TestCase(case_no=n, technique="idor_read.control.self", payload=own,
+                              mutation=[{"op": "set_input", "value": own}, {"op": "as_principal", "principal": acting}],
+                              is_control=True, principal=acting,
+                              positive={"type": "status_in", "values": [200]},
+                              negative="the acting account cannot read its own object by id, so the tooling or sample id is wrong",
+                              description="control: the acting account reads its own object by id (single-account viable)"))
+        n += 1
+    if own.isdigit():
+        iv = int(own)
+        for i, off in enumerate(o for o in (1, -1, 2, 7, 50) if iv + o >= 0):
+            nid = str(iv + off)
+            cases.append(TestCase(case_no=n, technique=f"idor_read.enum.seq_{i}", payload=nid,
+                                  mutation=[{"op": "set_input", "value": nid}, {"op": "as_principal", "principal": acting}],
+                                  principal=acting,
+                                  positive={"type": "third_party_seen"},
+                                  negative=f"the neighbouring id {nid} returns no record belonging to anyone outside the test accounts",
+                                  rung="cross_principal_read",
+                                  description=f"IDOR sequential enumeration: own id {off:+d} (Rule 0 third-party signal, single-account)"))
+            n += 1
     return cases
 
 
