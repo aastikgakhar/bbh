@@ -222,7 +222,18 @@ def _depth_second_order(ledger) -> int:
 
 def _depth_chains(ledger) -> int:
     n = 0
-    # low-value confirmed findings and candidates become chain material
+    # cross-class chaining engine: compose the capabilities of candidate/confirmed cells with signals
+    # seen in traffic into concrete multi-step chains, and queue each with its test plan.
+    from bbh import chains as chain_engine
+
+    for ch in chain_engine.detect_chains(ledger):
+        cells = ",".join(str(c) for c in ch["from_cells"])
+        tag = "high" if ch["confidence"] == "high" else "hypothesis"
+        title = f"Chain ({tag}): {ch['name']}"
+        if ch["missing_preconditions"]:
+            title += f" -- needs: {', '.join(ch['missing_preconditions'])}"
+        n += _add(ledger, 5, title, ch, f"chain:{ch['name']}:{cells}", test_plan=ch["test_plan"])
+    # low-value confirmed findings and candidates are also chain material
     for row in ledger.q("SELECT id, cell_id, rung, severity FROM findings WHERE severity IN ('info','low')"):
         n += _add(ledger, 5, f"Chain attempt from low finding {row['id']} (rung {row['rung']})",
                   {"finding_id": row["id"]}, f"chain_finding:{row['id']}")

@@ -17,7 +17,7 @@ Then restart Claude Code (or `/plugin` to confirm it loaded). To develop or run 
 claude --plugin-dir C:/Tools/burp-mcp/bbh
 ```
 
-Either way loads the bbh MCP server (30 tools), the hooks, and the three agents (`bbh:class-tester`, `bbh:verifier`, `bbh:triager`). The plugin skills are namespaced `bbh:recon`, `bbh:coverage-matrix`, `bbh:report-writer`, `bbh:triage-gate`; the project copies under `.claude/skills/` keep their bare names, so both coexist.
+Either way loads the bbh MCP server (31 tools), the hooks, and the three agents (`bbh:class-tester`, `bbh:verifier`, `bbh:triager`). The plugin skills are namespaced `bbh:recon`, `bbh:coverage-matrix`, `bbh:report-writer`, `bbh:triage-gate`; the project copies under `.claude/skills/` keep their bare names, so both coexist.
 
 ### Requirements
 

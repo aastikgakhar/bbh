@@ -158,6 +158,18 @@ def render_findings_summary(ledger) -> str:
             lines.append(f"- cell {c['id']} {c['vuln_class']} (endpoint {c['endpoint_id']}): {(c['note'] or '').strip()[:120]}")
     else:
         lines.append("- none")
+    try:
+        from . import chains as chain_engine
+        chain_rows = chain_engine.detect_chains(ledger)
+    except Exception:  # noqa: BLE001
+        chain_rows = []
+    lines += ["", "## Chain candidates (cross-class)"]
+    if chain_rows:
+        for ch in chain_rows:
+            miss = f"; needs: {', '.join(ch['missing_preconditions'])}" if ch["missing_preconditions"] else ""
+            lines.append(f"- [{ch['confidence']}] {ch['name']} ({ch['severity'].upper()}) from cells {ch['from_cells']}{miss}")
+    else:
+        lines.append("- none")
     killed = ledger.q("SELECT f.report_no, f.title, t.objection FROM findings f LEFT JOIN triage t ON t.finding_id=f.id "
                       "WHERE f.status='killed' GROUP BY f.id ORDER BY f.id")
     lines += ["", "## Reports killed at the gate"]

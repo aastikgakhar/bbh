@@ -9,7 +9,7 @@ It is built for a specific, legal use: **authorized** black-box / grey-box testi
 ## What you get (60 seconds)
 
 - **A ledger as the single source of truth** (`.bbh/ledger.db`, SQLite/WAL). One row per `(endpoint, input, vuln-class)` cell. Closing a class on one input never touches its siblings. Every state change is an append-only event.
-- **30 MCP tools** over that ledger. The loop is `status` -> `next_task` -> `run_cases`/`send_case` -> `close_cell` or `open_finding` -> `verify_finding` -> `render_report`. Each tool refuses an invalid transition and tells you exactly what is missing.
+- **31 MCP tools** over that ledger. The loop is `status` -> `next_task` -> `run_cases`/`send_case` -> `close_cell` or `open_finding` -> `verify_finding` -> `render_report`. Each tool refuses an invalid transition and tells you exactly what is missing.
 - **A planner** that opens the right cells from each request/response shape, and **generators for 32 vulnerability classes** (SQLi, XSS, IDOR, CSRF, SSRF, mass-dump, and more). Every class gets at least 10 cases over 5 techniques plus a positive control before it can close negative.
 - **One scoped sender.** Scope and Rule 0 (no third-party data) are checked in code on every request; a kill switch stops all traffic instantly; one cross-process rate limiter caps load no matter how many sub-agents run.
 - **Hooks** that survive compaction (they re-inject the next task), block out-of-scope navigation, deny sub-agents the researcher's real browser, lint every `report-*.md` into the house format, and block the Stop while cells are open.
@@ -49,7 +49,7 @@ or, to run it for a single session without installing, launch Claude Code in the
 claude --plugin-dir C:/Tools/burp-mcp/bbh
 ```
 
-Either way loads the bbh MCP server (30 tools), the six hooks, the three sub-agents (`bbh:class-tester`, `bbh:verifier`, `bbh:triager`), and the four skills (namespaced `bbh:recon`, `bbh:coverage-matrix`, `bbh:report-writer`, `bbh:triage-gate`).
+Either way loads the bbh MCP server (31 tools), the six hooks, the three sub-agents (`bbh:class-tester`, `bbh:verifier`, `bbh:triager`), and the four skills (namespaced `bbh:recon`, `bbh:coverage-matrix`, `bbh:report-writer`, `bbh:triage-gate`).
 
 ---
 

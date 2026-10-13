@@ -153,6 +153,21 @@ def reload() -> dict:
 
 
 @mcp.tool()
+def chains() -> dict:
+    """List the cross-class attack chains currently viable: capabilities from candidate/confirmed
+    cells composed with signals seen in traffic (e.g. an open redirect + a token observed in a URL
+    = token exfiltration). Each carries the contributing cell ids, any missing precondition, and a
+    concrete test plan. Chains are also queued as depth tasks; this is the at-a-glance view."""
+    try:
+        from . import chains as chain_engine
+        led = L()
+        return {"ok": True, "chains": chain_engine.detect_chains(led),
+                "capabilities": {k: v for k, v in chain_engine.available_capabilities(led).items()}}
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
 def next_task(agent: str = "") -> dict:
     """Claim and return the next unit of work: the cell/finding/depth item, its context, the generated cases, the class recipe excerpt, and the exact completion criteria. Work on THIS, not on what you prefer."""
     try:
