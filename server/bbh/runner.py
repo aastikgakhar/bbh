@@ -368,7 +368,16 @@ def _decide(ledger, planned, eval_ctx, exchange_for_block, cap_dir, stem) -> tup
     result, detail = ev.evaluate(planned["positive"], eval_ctx)
     loc = ledger.paths.rel(cap_dir / f"{stem}.http")
     if result is True:
-        return ("control_pass" if planned["is_control"] else "positive"), f"{detail} ({loc})"
+        if planned["is_control"]:
+            return "control_pass", f"{detail} ({loc})"
+        # variable-response guard: if the positive is only "differs from / matches the control" and
+        # the control's own repeats already vary materially, the endpoint is non-deterministic by
+        # design and this is not attributable to the payload. Downgrade to inconclusive (a definitive
+        # signal — a content marker, timing, OOB, a counter-read — is never downgraded).
+        if ev.positive_is_pure_baseline_cmp(planned["positive"]) and ev.baseline_unstable(eval_ctx):
+            return "inconclusive", (f"variable-response endpoint: the control's own repeats differ materially, so this "
+                                    f"baseline differential is not attributable to the payload ({detail}) ({loc})")
+        return "positive", f"{detail} ({loc})"
     if result is None:
         if detail.startswith("UNKNOWN_CONDITION"):
             # Stale-code signal: record it loudly so status() can surface it, then fall through to

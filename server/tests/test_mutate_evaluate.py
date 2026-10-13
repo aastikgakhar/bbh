@@ -107,6 +107,35 @@ def test_unauth_replay_read_is_not_positive_on_an_empty_200_control():
     assert evaluate(read.positive, data)[0] is True
 
 
+def test_variable_response_guard_classifies_positives():
+    from bbh.evaluate import positive_is_pure_baseline_cmp
+    # pure "differs from / matches the control" comparisons are guardable
+    assert positive_is_pure_baseline_cmp({"type": "all", "of": [
+        {"type": "not", "of": {"type": "same_as_case", "case": 0}},
+        {"type": "len_diff", "a": "this", "b": 1, "min_bytes": 24}]}) is True
+    # the union shape (a differential gated by a status exclusion) is still a baseline comparison
+    assert positive_is_pure_baseline_cmp({"type": "all", "of": [
+        {"type": "not", "of": {"type": "same_as_case", "case": 0}},
+        {"type": "not", "of": {"type": "status_in", "values": [400, 422]}}]}) is True
+    # a specific content marker, timing, OOB or a counter-read is definitive -> never guarded
+    assert positive_is_pure_baseline_cmp({"type": "all", "of": [
+        {"type": "body_contains", "value": "victim-secret"}, {"type": "same_as_case", "case": 0}]}) is False
+    assert positive_is_pure_baseline_cmp({"type": "elapsed_over_baseline", "min_ms": 1000}) is False
+    assert positive_is_pure_baseline_cmp({"type": "oob_hit", "token": "x"}) is False
+
+
+def test_variable_response_guard_detects_an_unstable_baseline():
+    from bbh.evaluate import baseline_unstable
+    stable = EvalContext(this_case=1, exchanges={0: [ex(body="x" * 500), ex(body="x" * 505), ex(body="x" * 498)]})
+    assert baseline_unstable(stable, 0) is False
+    varying = EvalContext(this_case=1, exchanges={0: [ex(body="x" * 100), ex(body="x" * 900), ex(body="x" * 500)]})
+    assert baseline_unstable(varying, 0) is True
+    mixed = EvalContext(this_case=1, exchanges={0: [ex(status=200, body="x" * 100), ex(status=500, body="x" * 100)]})
+    assert baseline_unstable(mixed, 0) is True
+    one = EvalContext(this_case=1, exchanges={0: [ex(body="x" * 100)]})
+    assert baseline_unstable(one, 0) is False  # <2 repeats: cannot tell, so not flagged
+
+
 def test_boolean_pair():
     ctx = EvalContext(this_case=2, exchanges={0: [ex(body="x" * 500)], 1: [ex(body="x" * 502)], 2: [ex(body="x" * 40)]})
     cond = {"type": "all", "of": [{"type": "same_as_case", "a": 1, "case": 0, "max_len_diff": 5},

@@ -257,3 +257,51 @@ def summarise(ex: Exchange) -> str:
         return f"no response ({ex.error or 'transport error'})"
     ct = ex.response.content_type or "-"
     return f"status {ex.status}, {ex.length} bytes, {ct}, {ex.elapsed_ms} ms"
+
+
+# --- variable-response guard --------------------------------------------------------------------
+# Some endpoints return a different body per request by design (an SDK flag resolver, a feed, a
+# nonce-bearing page). For those, a positive that only means "this response differs from the
+# control" is not attributable to the payload, so it must not raise a candidate. These helpers let
+# the runner downgrade exactly those positives to inconclusive, while leaving a definitive signal
+# (a specific content marker, timing, OOB, a counter-read, third-party data) untouched.
+
+_BASELINE_CMP_TYPES = {"same_as_case", "len_diff", "matches_base"}
+_STRONG_SIGNAL_TYPES = {"oob_hit", "counter_read_contains", "counter_read_not_contains",
+                        "elapsed_over_baseline", "elapsed_over_case", "elapsed_ratio",
+                        "browser_marker", "browser_text_contains", "third_party_seen",
+                        "body_contains", "body_regex"}
+
+
+def _condition_types(cond) -> set:
+    if not isinstance(cond, dict):
+        return set()
+    t = cond.get("type")
+    out = {t} if t else set()
+    if t in ("all", "any"):
+        for sub in cond.get("of") or []:
+            out |= _condition_types(sub)
+    elif t == "not":
+        out |= _condition_types(cond.get("of"))
+    return out
+
+
+def positive_is_pure_baseline_cmp(cond: dict) -> bool:
+    """True if the positive is only a 'differs from / matches the control' comparison (length or
+    status), with no content marker, timing, OOB, counter-read or third-party signal. Those are the
+    positives a variable-response endpoint can trip on its own."""
+    types = _condition_types(cond)
+    return bool(types & _BASELINE_CMP_TYPES) and not (types & _STRONG_SIGNAL_TYPES)
+
+
+def baseline_unstable(ctx: EvalContext, case: int | str = 0, *, min_rel: float = 0.25, min_abs: int = 64) -> bool:
+    """True if the reference case's own repeats differ materially (a different status, or a length
+    spread beyond the comparison tolerance): the endpoint varies by design, so a baseline
+    differential is unreliable. Needs >= 2 repeats to judge; otherwise returns False (cannot tell)."""
+    exs = [e for e in ctx.case(case) if e.response is not None]
+    if len(exs) < 2:
+        return False
+    if len({e.status for e in exs}) > 1:
+        return True
+    lens = [e.length for e in exs]
+    return (max(lens) - min(lens)) > max(min_abs, int(min_rel * max(max(lens), 1)))
