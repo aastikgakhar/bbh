@@ -284,7 +284,7 @@ Agents (`agents/*.md`, tools listed explicitly because wildcard support in `tool
 - `verifier`: `show`, `verify_finding`, `verifier_signoff`, `send_case`, `oob_check`, `fetch`, Burp read tools, `Read`, `Grep`, `Glob`. Prompted to refute. The only agent the hook lets call `verifier_signoff`.
 - `triager`: `Read`, `Glob`, `Grep` only. Body is `triage-gate/references/agent-brief.md` verbatim, plus the browser rule.
 
-Concurrency: `prompt.md` `Max concurrent testers` (default 3, hard cap 25). All testers share one sender and one cross-process rate limiter, so more testers never means more load on the target.
+Concurrency: `prompt.md` `Max concurrent testers` (default 2, hard cap 10). All testers share one sender and one cross-process rate limiter, so more testers never means more load on the target, only more contention on the single-process MCP server. Keep it low and leave a slot free: `next_task()` always hands a candidate out first, so a free lane can verify it instead of starving behind long `run_cases` calls (a field-reported failure at 3 lanes).
 
 ## 13. Contradictions between the skills and this harness
 
@@ -296,7 +296,7 @@ Concurrency: `prompt.md` `Max concurrent testers` (default 3, hard cap 25). All 
 4. Banned words: the ledger checks the build-spec hedge list on ledger fields; the report lint uses the report-writer list (`if`, `potentially`, `could be chained`, `may allow`, `theoretically`, `phishing`, `should`, `seems`, `appears to`, plus `potential`, `could`, `may` from the writer's gate). Report format belongs to the skill.
 5. report-writer asks for two clean reproductions; the harness adds the 60-second gap and does it by replaying the assertion.
 6. recon seeds `state.csv` by hand with `pending` rows; `state.csv` is now generated, and `pending` means an endpoint with unfinished cells.
-7. CLAUDE.md caps agents at 25 and says to prefer far fewer; the harness defaults to 3 class-testers, reads `Max concurrent testers` from `prompt.md`, and hard-caps at 25.
+7. CLAUDE.md caps agents and says to prefer far fewer; the harness defaults to 2 class-testers, reads `Max concurrent testers` from `prompt.md`, and hard-caps at 10. A candidate that cannot be verified during an outage is parked `blocked` with reason `verifier_unavailable` (its evidence kept for later), so an unreachable verifier never freezes the board.
 8. classes.md suggests cloud-metadata and internal-address SSRF probes and file-based traversal; the generators confirm SSRF only through OOB and traversal only through normalisation differentials and app-owned files (Rule 0 and the no-file-read rule of the build spec). The researcher can still do more by hand.
 9. CLAUDE.md forbids "automated scanners against production"; bbh is not a scanner: every case is chosen by the planner for one input, sent one at a time at the engagement rate limit, scope-checked, and driven by the agent.
 10. coverage-matrix verifies CSRF by opening `poc.html` in the second principal's real browser; the harness generates `poc-N.html` and either opens it in a private headless browser with Account B's session or records the researcher's manual confirmation through `record_case`.

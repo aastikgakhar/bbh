@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS engagement (
   target TEXT, scope_json TEXT NOT NULL DEFAULT '[]', oos_json TEXT NOT NULL DEFAULT '[]',
   oos_notes_json TEXT NOT NULL DEFAULT '[]', programme TEXT, marker_header_json TEXT,
   rate_limit_rps REAL NOT NULL DEFAULT 2.0, oob_json TEXT NOT NULL DEFAULT '{"mode": "none"}',
-  burp_proxy TEXT, burp_mcp_url TEXT, max_testers INTEGER NOT NULL DEFAULT 3,
+  burp_proxy TEXT, burp_mcp_url TEXT, max_testers INTEGER NOT NULL DEFAULT 2,
   support_hosts_json TEXT NOT NULL DEFAULT '[]', accounts_json TEXT NOT NULL DEFAULT '[]',
   login_json TEXT, target_notes TEXT, prompt_hash TEXT, configured INTEGER NOT NULL DEFAULT 0,
   problems_json TEXT NOT NULL DEFAULT '[]', updated_at REAL
@@ -925,10 +925,12 @@ class Ledger:
                     missing.append(f"reason from: {', '.join(C.BLOCKED_REASONS)}")
                 if not unblock or not unblock.strip():
                     missing.append("unblock: what concretely would unblock this cell")
-                if current == "candidate":
+                if current == "candidate" and reason != "verifier_unavailable":
                     v = cell["verifier"] or {}
                     if v.get("verdict") not in ("refuted", "blocked"):
-                        missing.append("verifier sign-off with verdict 'blocked' (a candidate never dies silently)")
+                        missing.append("verifier sign-off with verdict 'blocked' (a candidate never dies silently); "
+                                       "or, if the verifier agent/MCP is genuinely unreachable, close with reason "
+                                       "'verifier_unavailable' to PARK it with its evidence (not confirmed, not refuted)")
                 if missing:
                     raise LedgerError(f"cell {cell_id} ({vc.name}) cannot close blocked", missing)
                 self._set_state(cell_id, ("open", "in_progress", "candidate"), "blocked", "cell.close",

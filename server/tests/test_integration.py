@@ -119,6 +119,23 @@ def test_options_preflight_records_request_but_creates_no_endpoint(ledger, eng):
     assert ledger.request(rid2).get("endpoint_id")
 
 
+def test_candidate_parks_as_blocked_when_verifier_unavailable(ledger, eng):
+    import pytest
+
+    eid, _ = ledger.upsert_endpoint(origin="http://127.0.0.1:5057", method="GET", path_template="/p")
+    iid, _ = ledger.upsert_input(endpoint_id=eid, name="id", location="query", sample_value="1")
+    cid, _ = ledger.open_cell(endpoint_id=eid, input_id=iid, vuln_class="sqli")
+    ledger.conn.execute("UPDATE cells SET state='candidate' WHERE id=?", (cid,))
+    ledger.conn.commit()
+    # a normal blocked reason still demands the verifier's independent sign-off (a candidate never dies silently)
+    with pytest.raises(Exception):
+        ledger.close_cell(cid, "blocked", reason="other", unblock="x")
+    # but verifier_unavailable parks the candidate with its evidence, no sign-off required (outage escape)
+    ledger.close_cell(cid, "blocked", reason="verifier_unavailable",
+                      unblock="re-run the verifier when the MCP/subagent is reachable")
+    assert ledger.cell(cid)["state"] == "blocked"
+
+
 def test_500_escalation_opens_deeper_injection_cells(ledger, eng):
     from bbh.runner import _maybe_escalate_server_error
 

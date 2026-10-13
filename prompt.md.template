@@ -54,7 +54,7 @@ These tune the bbh harness. All are optional; the defaults are shown.
 - **OOB callback:** `none` (set `local 7731` for the built-in loopback listener, `listener <base-url> <poll-url>` for your own, or `interactsh <server>`. Without one, SSRF and XXE cells can only close `blocked: no_oob_listener`.)
 - **Burp proxy:** `127.0.0.1:8080` (set `none` to send direct; everything still lands in Burp when proxied)
 - **Burp MCP:** `http://127.0.0.1:9876` (the SSE endpoint ingest reads history from; `none` to disable Burp ingest)
-- **Max concurrent testers:** `3` (class-tester subagents at once; hard cap 25; they share one rate limiter)
+- **Max concurrent testers:** `2` (class-tester subagents at once; hard cap 10; they share one rate limiter, so more testers never means more load on the target — keep this low and leave a slot free so a verifier can run when a candidate appears)
 - **Support hosts:** `none` (extra hosts the agent may navigate to but not send test traffic to, beyond the auto-derived mailboxes/IdP/ngrok/loopback, e.g. a separate SSO domain)
 
 ## Environment

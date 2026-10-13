@@ -40,6 +40,7 @@ BLOCKED_REASONS = {
     "requires_browser": "needs a real browser step the harness cannot drive",
     "requires_researcher": "needs a human action (CAPTCHA, payment, KYC, phone)",
     "kill_switch": ".bbh/STOP is present",
+    "verifier_unavailable": "the verifier agent/MCP is unreachable; the candidate is parked with its evidence for later verification (not confirmed, not refuted)",
     "other": "see unblock text",
 }
 
