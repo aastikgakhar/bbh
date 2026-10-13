@@ -39,17 +39,17 @@ Run against the planted-bug lab (10 bugs, 3 decoys) with the real harness module
 | 9 | mass_dump | confirmed | candidate | True |
 | D1 | htmli | negative | open | False |
 | D1 | xss_reflected | negative | open | False |
-| D2 | sqli | negative | candidate | False |
+| D2 | sqli | negative | open | False |
 | D3 | open_redirect | negative | open | False |
 
 ## Ledger counts at end
 
 ```
 {
- "open": 143,
+ "open": 146,
  "in_progress": 0,
  "negative": 0,
- "candidate": 10,
+ "candidate": 9,
  "confirmed": 1,
  "n_a": 1,
  "blocked": 0
