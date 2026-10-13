@@ -171,6 +171,13 @@ def evaluate(cond: dict, ctx: EvalContext) -> tuple[bool | None, str]:
             d = abs(e.length - bl)
             return d >= n, f"{e.length} vs {bl} bytes (case {b}), diff {d}"
         return _per_repeat(ctx.case(a), f)
+    if t == "min_len":
+        # Body of the referenced case (default "this") is at least `min` bytes. Used to gate an
+        # unauth-read positive on the authenticated control actually carrying data: "same as the
+        # control" proves nothing when the control body is empty (an anonymous beacon or a 204-like
+        # 200). Returns None (not a verdict) when the case has no exchange.
+        ref, lo = cond.get("case", "this"), int(cond["min"])
+        return _per_repeat(ctx.case(ref), lambda e: (e.length >= lo, f"body {e.length} bytes (need >= {lo})"))
     if t == "same_as_case":
         a, k, m = cond.get("a", "this"), cond["case"], int(cond.get("max_len_diff", 0))
         kex = ctx.case(k)

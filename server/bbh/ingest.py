@@ -294,6 +294,12 @@ def record_exchange(ledger, ex: Exchange, *, source: str, principal_id: int | No
         n = normalise(ex.request, auth_header_names=auth_headers, auth_cookie_names=auth_cookies)
         if n.flags.get("static_asset"):
             return rid
+        # A CORS preflight or a HEAD/TRACE/CONNECT probe is not an application endpoint. The request
+        # row stays (evidence), but it must not spawn an endpoint+cells. Otherwise the cors cells'
+        # own OPTIONS preflights are re-ingested as "endpoints", each opening a fresh batch of cells,
+        # and the matrix never converges (the harness tests its own test traffic).
+        if ex.request.method in ("OPTIONS", "HEAD", "TRACE", "CONNECT"):
+            return rid
         eid, new_ep = ledger.upsert_endpoint(origin=n.origin, method=n.method, path_template=n.path_template,
                                              source="traffic", first_seen_request_id=rid, family=n.family,
                                              feature=n.feature, auth_required=n.flags.get("auth_required"),

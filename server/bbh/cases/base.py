@@ -161,6 +161,7 @@ CONDITIONS: dict[str, tuple[str, ...]] = {
     "location_host": ("host",),
     "elapsed_over_baseline": ("min_ms",),
     "len_diff": ("min_bytes", "b"),
+    "min_len": ("min",),
     "same_as_case": ("case",),
     "oob_hit": (),
     "counter_read_contains": ("value",),

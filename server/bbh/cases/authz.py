@@ -179,11 +179,15 @@ def gen_unauth_replay(ctx: Ctx) -> list[TestCase]:
         ("strip", "empty_cookie", [{"op": "set_header", "name": "Cookie", "value": ""}]),
         ("token", "junk_bearer", [{"op": "strip_auth"}, {"op": "set_header", "name": "Authorization", "value": "Bearer x"}]),
     ]
+    # The unauth response matches the authenticated control AND the control actually carried data.
+    # Without the min_len gate, an anonymous beacon or a 204-like empty 200 scores positive on every
+    # strip case, because "same as a zero-byte control" is vacuously true and there is nothing to leak.
+    _CTRL_HAS_DATA = {"type": "min_len", "case": 0, "min": 8}
     for family, variant, muts in strips:
         cases.append(TestCase(case_no=n, technique=f"unauth_replay.{family}.{variant}", payload=variant,
                               mutation=muts, principal="unauth",
                               positive={"type": "all", "of": [{"type": "same_as_case", "a": "this", "case": 0, "max_len_diff": 64},
-                                                             {"type": "body_not_contains", "value": "<form"}]},
+                                                             {"type": "body_not_contains", "value": "<form"}, _CTRL_HAS_DATA]},
                               negative=f"stripping auth ({variant}) no longer returns the authenticated data",
                               rung="unauth_read", description=f"unauthenticated replay: {variant}"))
         n += 1
@@ -198,7 +202,8 @@ def gen_unauth_replay(ctx: Ctx) -> list[TestCase]:
     ]:
         cases.append(TestCase(case_no=n, technique=f"unauth_replay.{family}.{variant}", payload=variant,
                               mutation=muts, principal="unauth",
-                              positive={"type": "same_as_case", "a": "this", "case": 0, "max_len_diff": 64},
+                              positive={"type": "all", "of": [{"type": "same_as_case", "a": "this", "case": 0, "max_len_diff": 64},
+                                                             _CTRL_HAS_DATA]},
                               negative=f"the {variant} variant does not return the authenticated response",
                               rung="unauth_read", description=f"unauthenticated replay: {family} {variant}"))
         n += 1

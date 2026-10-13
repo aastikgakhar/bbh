@@ -30,10 +30,16 @@ def build_ctx(ledger, cell_id: int) -> tuple[Ctx, Request, dict, InputRef, str |
     ep = ledger.endpoint(cell["endpoint_id"])
     base = _base_request(ledger, ep, cell)
     inp = ledger.input(cell["input_id"]) if cell["input_id"] else None
+    # The planner (and set_cell_context) record per-input facts such as "orderby" in the CELL context,
+    # while generators read ctx.flags. Merge the per-cell flag so an ORDER BY input gets its
+    # ORDER BY cases and its required "orderby" family.
+    flags = dict(ep["flags"] or {})
+    if (cell["context"] or {}).get("orderby"):
+        flags["orderby"] = True
     ctx_kwargs = dict(
         cell_id=cell_id, vuln_class=cell["vuln_class"], salt=cell["salt"], method=ep["method"],
         url=base.url, path_template=ep["path_template"], content_type=ep["content_type"],
-        body_kind=normalise(base).body_kind, flags=ep["flags"], csp=_csp_of(ledger, ep),
+        body_kind=normalise(base).body_kind, flags=flags, csp=_csp_of(ledger, ep),
         oob_configured=(ledger.engagement().get("oob") or {}).get("mode") not in (None, "none", "invalid"),
         extra=dict(cell["context"] or {}),
     )

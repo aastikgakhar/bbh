@@ -82,6 +82,31 @@ def test_timing_against_baseline_median_and_proportionality():
     assert evaluate({"type": "elapsed_over_baseline", "min_ms": 3600, "baseline_case": 0}, ctx)[0] is False
 
 
+def test_min_len_gates_on_a_referenced_case_body():
+    # min_len on the authenticated control (case 0): empty control -> not a verdict pass; real body -> pass.
+    empty = EvalContext(this_case=1, exchanges={0: [ex(body="")], 1: [ex(body="")]})
+    assert evaluate({"type": "min_len", "case": 0, "min": 8}, empty)[0] is False
+    data = EvalContext(this_case=1, exchanges={0: [ex(body='{"balance":12345}')], 1: [ex(body='{"balance":12345}')]})
+    assert evaluate({"type": "min_len", "case": 0, "min": 8}, data)[0] is True
+    assert evaluate({"type": "min_len", "case": 5, "min": 8}, data)[0] is None  # missing case -> no verdict
+
+
+def test_unauth_replay_read_is_not_positive_on_an_empty_200_control():
+    # The real false-positive shape: an anonymous beacon returns an empty 200 with and without auth.
+    # same_as_case(0) is vacuously true, but min_len(case 0) must defeat it so no candidate is raised.
+    from bbh.cases import generate
+    from bbh.cases.base import Ctx
+    cases = generate(Ctx(cell_id=1, vuln_class="unauth_replay", salt="s", method="POST", url="http://x/_api/a/log",
+                         path_template="/_api/a/log", flags={"state_changing": True}, body_kind="json",
+                         acting_principal="A"), strict=False)
+    read = next(c for c in cases if c.technique == "unauth_replay.strip.full")
+    empty = EvalContext(this_case=read.case_no, exchanges={0: [ex(status=200, body="")], read.case_no: [ex(status=200, body="")]})
+    assert evaluate(read.positive, empty)[0] is False
+    leak = ex(status=200, body='{"ssn":"900101-1234","name":"Bob"}')
+    data = EvalContext(this_case=read.case_no, exchanges={0: [leak], read.case_no: [leak]})
+    assert evaluate(read.positive, data)[0] is True
+
+
 def test_boolean_pair():
     ctx = EvalContext(this_case=2, exchanges={0: [ex(body="x" * 500)], 1: [ex(body="x" * 502)], 2: [ex(body="x" * 40)]})
     cond = {"type": "all", "of": [{"type": "same_as_case", "a": 1, "case": 0, "max_len_diff": 5},

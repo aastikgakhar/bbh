@@ -99,6 +99,26 @@ def seed_endpoint(ledger, method, path, body=b"", ctype=None, principal="A"):
     return rid
 
 
+def test_options_preflight_records_request_but_creates_no_endpoint(ledger, eng):
+    (eng.captures / "session-A.txt").write_text("Cookie: lab_session=AAA\n")
+    before = len(ledger.q("SELECT id FROM endpoints"))
+    # a CORS preflight the harness's own cors cell would send
+    req = Request(method="OPTIONS", url="http://127.0.0.1:5057/_api/x/do",
+                  headers=[("Host", "127.0.0.1:5057"), ("Access-Control-Request-Method", "POST")], body=b"")
+    resp = Response(200, "OK", [("Allow", "POST,OPTIONS")], b"")
+    rid = record_exchange(ledger, Exchange(request=req, response=resp), source="import",
+                          principal_id=ledger.principal("A")["id"])
+    assert rid is not None  # the request row is kept as evidence
+    assert ledger.request(rid).get("endpoint_id") in (None, 0)  # but it spawned no endpoint
+    assert len(ledger.q("SELECT id FROM endpoints")) == before
+    # a real POST to the same path still creates an endpoint
+    req2 = Request(method="POST", url="http://127.0.0.1:5057/_api/x/do",
+                   headers=[("Host", "127.0.0.1:5057"), ("Content-Type", "application/json")], body=b"{}")
+    rid2 = record_exchange(ledger, Exchange(request=req2, response=Response(200, "OK", [("Content-Type", "application/json")], b"{}")),
+                           source="import", principal_id=ledger.principal("A")["id"])
+    assert ledger.request(rid2).get("endpoint_id")
+
+
 def test_plan_opens_independent_sibling_cells(ledger, eng):
     (eng.captures / "session-A.txt").write_text("Cookie: lab_session=AAA\n")
     rid = seed_endpoint(ledger, "GET", "/search?q=hi")
