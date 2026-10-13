@@ -30,6 +30,8 @@ CONTEXTS = {
              dict(input_name="X-Tenant", input_location="header", value_type="string", sample_value="acme")],
     "nosqli": [dict(method="POST", input_name="password", input_location="json", json_path="password", body_kind="json", value_type="string", sample_value="pw"),
                dict(method="POST", input_name="user", input_location="form", body_kind="form", value_type="string", sample_value="alice")],
+    "command_injection": [dict(input_name="host", input_location="query", value_type="string", sample_value="localhost"),
+                          dict(method="POST", input_name="name", input_location="json", json_path="name", body_kind="json", value_type="string", sample_value="x")],
     "idor_read": [dict(input_name="id", input_location="path", value_type="int", sample_value="3", extra={"other_object_id": "7"}),
                   dict(input_name="noteId", input_location="query", value_type="uuid", sample_value="0b6c2f8e-3e0f-4a8e-9d1c-6b7f2a1e9c3d")],
     "idor_write": [dict(method="POST", input_name="id", input_location="path", value_type="int", sample_value="3",
@@ -106,7 +108,8 @@ def test_tokens_have_no_fixed_prefix():
 
 @pytest.mark.parametrize("payload", [
     "1; DROP TABLE users--", "x' ; DELETE FROM notes--", "1 UPDATE users SET role='admin'", "INSERT INTO t VALUES(1)",
-    "'; EXEC xp_cmdshell 'dir'--", "1 UNION SELECT load_file('/etc/passwd')", "file:///etc/passwd", "..\\..\\windows\\win.ini",
+    "'; EXEC xp_cmdshell 'dir'--", "1 UNION SELECT load_file('/etc/passwd')", "file:///etc/passwd",
+    "..\\..\\windows\\system32\\config\\sam", "../../etc/shadow",
     "{{ ''.__class__.__mro__[1].__subclasses__() }}{{ __import__('os').system('id') }}", "<!ENTITY x SYSTEM \"file:///c:/x\">",
     "http://169.254.169.254/latest/meta-data/", "; cat /etc/hosts", "$(whoami)", "bbhcanary",
 ])
@@ -120,6 +123,8 @@ def test_screen_rejects_dangerous(payload):
     "1 AND SLEEP(5)", "1;SELECT pg_sleep(5)--", "' OR '1'='1", "1 ORDER BY 1--", "{{7*7}}", "${7*7}",
     "<script>console.log('k3j2')</script>", "https://lab.test@evil.test", "{\"$ne\": null}", "%0d%0aSet-Cookie:%20a=b",
     "{{OOB}}", "1)) AND (SELECT 1 FROM (SELECT(SLEEP(2)))a)--",
+    # the two canonical read-only LFI proofs are allowed deliberately (see the safety screen)
+    "../../../../../../etc/passwd", "..\\..\\..\\..\\windows\\win.ini",
 ])
 def test_screen_accepts_safe(payload):
     case = TestCase(case_no=1, technique="sqli.x.y", payload=payload, mutation=[{"op": "set_input", "value": payload}],

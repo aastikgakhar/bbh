@@ -318,7 +318,10 @@ _DESTRUCTIVE = [
     (re.compile(r"\b(exec|execute)\s*(\(|\s+\w)", re.I), "SQL EXEC"),
     (re.compile(r"xp_cmdshell|sp_oacreate|into\s+(out|dump)file|load_file\s*\(|pg_read_file|lo_import|copy\s+\w+\s+(from|to)\s+program", re.I), "file/command primitive in SQL"),
     (re.compile(r"\b(shutdown|kill)\b\s*(;|$)", re.I), "server control statement"),
-    (re.compile(r"(/etc/(passwd|shadow|hosts)|win\.ini|boot\.ini|/proc/self|system32|\\windows\\)", re.I), "system file path"),
+    # /etc/passwd and win.ini are the canonical READ-ONLY proof files for an LFI PoC and are
+    # allowed deliberately (non-destructive). Every sensitive system path stays banned: the shadow
+    # password file, boot.ini, /proc/self, and anything under system32.
+    (re.compile(r"(/etc/(shadow|hosts)|boot\.ini|/proc/self|system32)", re.I), "sensitive system file path"),
     (re.compile(r"\b(file|gopher|dict|ldap|jar|netdoc|expect|php)://", re.I), "dangerous URL scheme"),
     (re.compile(r"\b(__import__|subprocess|popen|os\.system|getRuntime|ProcessBuilder|child_process|Runtime\.exec)\b", re.I), "code/command execution primitive"),
     (re.compile(r"(\$\((?!\s*\d)|`\s*(id|whoami|uname|cat|ls|curl|wget|ping|nslookup)\b|;\s*(id|whoami|uname|cat|ls|curl|wget|ping|nslookup)\b|\|\s*(nc|bash|sh|cmd|powershell)\b|\b(bash|sh)\s+-c\b|cmd(\.exe)?\s+/c|powershell\s+-)", re.I), "shell command"),
@@ -343,13 +346,43 @@ def _strings(value: Any) -> list[str]:
     return out
 
 
+# The only shell commands an RCE PoC may run: read-only identity probes and a benign delay for a
+# timing proof. Never cat/curl/wget/nc/bash/rm or anything that reads files, exfiltrates or writes.
+_BENIGN_RCE_CMDS = {"id", "whoami", "uname", "hostname", "sleep", "timeout"}
+# Any of these appearing in a command_injection payload is forbidden even when the case declares a
+# benign rce_cmd: it means a second command was smuggled past the id/whoami/sleep proof.
+_FORBIDDEN_CMD = re.compile(
+    r"\b(cat|ls|dir|curl|wget|nc|ncat|bash|sh|zsh|ksh|cmd|powershell|pwsh|ping|nslookup|dig|rm|del|mv|move|"
+    r"cp|copy|chmod|chown|kill|dd|mkfs|format|python|perl|ruby|php|node|tee|scp|ssh|ftp|tftp|certutil|"
+    r"bitsadmin|mshta|wscript|cscript|rundll32|regsvr32|xxd|base64|openssl|socat)\b", re.I)
+
+
 def screen_payload(case: TestCase) -> list[str]:
     """Return safety problems in a case's payload, mutation values and extra."""
     problems: list[str] = []
     texts = _strings(case.payload) + _strings(case.mutation) + _strings(case.extra.get("counter_read"))
+    # A command_injection case proves RCE with a benign command only (id / whoami / sleep). It must
+    # declare that command in extra.rce_cmd; if it is on the allowlist, the generic "shell command"
+    # ban is lifted for THIS case only. Every other destructive pattern (cat/curl/rm/file paths/SQL
+    # file primitives/metadata) still applies, so a smuggled destructive token is still caught.
+    is_benign_rce = False
+    if case.technique.startswith("command_injection.") and not case.is_control:
+        raw = str((case.extra or {}).get("rce_cmd", "")).strip().lower()
+        cmd = raw.split()[0] if raw else ""
+        smuggled = next((t for t in texts if _FORBIDDEN_CMD.search(t)), None)
+        if cmd not in _BENIGN_RCE_CMDS:
+            problems.append(f"case {case.case_no} ({case.technique}): command_injection must declare a benign "
+                            f"extra.rce_cmd (one of {sorted(_BENIGN_RCE_CMDS)}), got {raw!r}")
+        elif smuggled is not None:
+            problems.append(f"case {case.case_no} ({case.technique}): a forbidden command was smuggled into a "
+                            f"benign RCE payload: {smuggled[:80]!r}")
+        else:
+            is_benign_rce = True  # a vetted id/whoami/sleep proof with no other command token
     for text in texts:
         for rx, label in _DESTRUCTIVE:
             if rx.search(text):
+                if is_benign_rce and label == "shell command":
+                    continue  # a vetted id/whoami/sleep proof; all other destructive bans still apply
                 problems.append(f"case {case.case_no} ({case.technique}): {label} in {text[:80]!r}")
     if case.route == "race":
         burst = int(case.extra.get("burst", 0))

