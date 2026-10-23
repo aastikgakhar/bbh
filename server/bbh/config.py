@@ -27,6 +27,8 @@ DEFAULT_DASHBOARD_PORT = 7733
 RESERVED_PORTS = {8080, 8765, 8766, 9222, *range(9876, 9896)}
 
 _FIELD_RE = re.compile(r"^\s*[-*]\s*\*\*(?P<key>[^*:]+?)\s*:?\s*\*\*\s*:?\s*(?P<value>.*)$")
+# Hand-filled briefs often drop the bold: `- Asset: Name`. Accepted as a fallback only.
+_PLAIN_FIELD_RE = re.compile(r"^\s*[-*]\s*(?P<key>[A-Za-z][A-Za-z0-9 _/-]{0,40}?)\s*:\s*(?P<value>.*)$")
 _STOP_RE = re.compile(r"^#\s+(worked\s+example|example)\b", re.IGNORECASE)
 _PLACEHOLDER_RE = re.compile(r"<[^<>]{1,120}>")
 
@@ -145,7 +147,7 @@ def parse_prompt_text(text: str) -> EngagementConfig:
     lines = _sections(text)
     fields: dict[str, str] = {}
     for line in lines:
-        m = _FIELD_RE.match(line)
+        m = _FIELD_RE.match(line) or _PLAIN_FIELD_RE.match(line)
         if m:
             key = re.sub(r"\s+", "_", m.group("key").strip().lower())
             fields.setdefault(key, _clean_value(m.group("value")))
